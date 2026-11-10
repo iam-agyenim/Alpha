@@ -15,7 +15,7 @@ import streamlit as st
 from src import charts as ch
 from src import data as data_mod
 from src import impact, model, stats
-from src.data import FACTOR_LABELS, REQUIRED, SYMPTOMS, load, summary
+from src.data import FACTOR_LABELS, NORMAL_STATUS, REQUIRED, SYMPTOMS, load, summary
 
 st.set_page_config(page_title="B787 Belt Defect Investigation", page_icon="✈️", layout="wide")
 
@@ -31,7 +31,7 @@ _PALETTE = (
     ":root {"
     f"--red:{ch.RED}; --amber:{ch.AMBER}; --green:{ch.GREEN}; --navy:{ch.NAVY}; --gold:{ch.GOLD};"
     f"--red-t:{_rgba(ch.RED, .14)}; --amber-t:{_rgba(ch.AMBER, .18)}; --green-t:{_rgba(ch.GREEN, .14)};"
-    f"--line:{_rgba(ch.GREY, .35)};"
+    f"--line:{_rgba(ch.GREY, .35)}; --navy-t:{_rgba(ch.NAVY, .07)};"
     "}"
 )
 st.markdown("<style>" + _PALETTE + """
@@ -67,6 +67,24 @@ st.markdown("<style>" + _PALETTE + """
   .band-Medium { background:var(--amber-t); border:1px solid var(--amber); }
   .band-Low { background:var(--green-t); border:1px solid var(--green); }
   .band-title { font-size:1.5rem; font-weight:800; margin:0; }
+
+  /* Fleet status board (deck: navy header, light-blue zebra rows, coloured status dots) */
+  .board-wrap { max-height:232px; overflow:auto; border-radius:8px; border:1px solid var(--line); margin:2px 0 10px 0; }
+  table.board { width:100%; min-width:640px; border-collapse:collapse; font-size:.93rem; }
+  table.board td, table.board th { white-space:nowrap; text-align:left; }
+  table.board thead th { position:sticky; top:0; z-index:1; background:var(--navy); color:#fff; padding:8px 14px;
+                         font-weight:700; }
+  table.board td { padding:6px 14px; border-top:1px solid var(--line); }
+  table.board tbody tr:nth-child(even) td { background:var(--navy-t); }
+  .ac, .st { font-weight:700; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:7px; }
+  .d-High { background:var(--red); } .d-Medium { background:var(--amber); } .d-Normal { background:var(--green); }
+  .chip { display:inline-block; padding:1px 8px; margin-right:4px; border-radius:999px; font-size:.76rem;
+          font-weight:600; border:1px solid var(--line); opacity:.7; }
+  .chip.bad { background:var(--red-t); border-color:var(--red); color:var(--red); opacity:1; }
+  .badge { display:inline-block; margin-left:6px; padding:0 7px; border-radius:5px; font-size:.72rem;
+           font-weight:700; background:var(--amber-t); border:1px solid var(--amber); }
+  .board-note { font-size:.8rem; opacity:.65; margin:-6px 0 8px 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -186,6 +204,42 @@ k[2].metric(f"Defect rate with {top_level}" if top else "Defect rate, top factor
 k[3].metric(f"Defect rate without {top_level}" if top else "Defect rate, other jobs",
             pct(others["defect"].mean()) if len(others) else "n/a",
             help=f"{int(others['defect'].sum())} of {len(others)} jobs")
+
+
+# Fleet status board: one row per aircraft, worst first (status rules: impact.fleet_status). Rendered with st.html
+# because its cells are data, like a dataframe, not narrative text.
+STATUS_KEY = {"High Risk": "High", "Medium": "Medium", "Normal": "Normal"}
+SYM_SHORT = {"Belt_Condition": "Condition", "Belt_Temperature": "Temperature", "Belt_Vibration": "Vibration"}
+
+
+def _readings(r) -> str:
+    chips = []
+    for c in SYM_PRESENT:
+        val = str(r[c])
+        bad = val in impact.ABNORMAL_VALUES
+        chips.append(f'<span class="chip{" bad" if bad else ""}">{SYM_SHORT[c]}{": " + html.escape(val) if bad else ""}'
+                     "</span>")
+    return "".join(chips) or "not recorded"
+
+
+_head = ["Aircraft", "Belt Status"] + (["Belt Readings"] if SYM_PRESENT else []) + ["Tool"]
+_rows = []
+for _, r in FLEET.iterrows():
+    badge = (f'<span class="badge">{html.escape(str(r["Tool_Status"]))}</span>'
+             if r["Tool_Status"] != NORMAL_STATUS else "")
+    cells = [f'<td class="ac">{html.escape(str(r["Aircraft_ID"]))}</td>',
+             f'<td><span class="dot d-{STATUS_KEY[r["Status"]]}"></span><span class="st">{r["Status"]}</span></td>']
+    if SYM_PRESENT:
+        cells.append(f"<td>{_readings(r)}</td>")
+    cells.append(f'<td>{html.escape(str(r["Tool_ID"]))}{badge}</td>')
+    _rows.append("<tr>" + "".join(cells) + "</tr>")
+st.html('<div class="board-wrap"><table class="board"><thead><tr>' + "".join(f"<th>{h}</th>" for h in _head)
+        + "</tr></thead><tbody>" + "".join(_rows) + "</tbody></table></div>")
+_counts = FLEET["Status"].value_counts()
+st.markdown(f'<div class="board-note">{len(FLEET)} aircraft, worst first: '
+            + " · ".join(f"{_counts.get(s, 0)} {s}" for s in impact.STATUS_ORDER)
+            + ". High Risk = defect or 2+ abnormal readings; Medium = 1 abnormal reading or a suspect / "
+              "uncalibrated tool.</div>", unsafe_allow_html=True)
 
 tabs = st.tabs(["Why are defects happening?", "When do defects happen?",
                 "Can we predict defects before the job?", "What should maintenance do?"])
