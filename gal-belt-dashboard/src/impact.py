@@ -58,27 +58,3 @@ def affected_aircraft(df: pd.DataFrame, top: dict | None) -> pd.DataFrame:
                      "Tool status": r["Tool_Status"], "Defect": r["Belt_Defect"], "Action": action})
     cols = ["Priority", "Record_ID", "Aircraft_ID", "Month", "Station", "Tool", "Tool status", "Defect", "Action"]
     return pd.DataFrame(rows, columns=cols).sort_values(["Priority", "Record_ID"]).reset_index(drop=True)
-
-
-def recommended_actions(top: dict | None) -> list[dict]:
-    if top is None:
-        return [{"action": "Keep monitoring", "why": "No pre-job factor stands out in this data.", "owner": "Reliability"}]
-    tool_levels = [top["level"]] if top["factor"] == "Tool_ID" else \
-        [c["level"] for c in top["confounded_with"] if c["factor"] == "Tool_ID"]
-    tool = tool_levels[0] if tool_levels else None
-    acts = []
-    if tool:
-        acts += [
-            {"action": f"Quarantine {tool} and recalibrate it", "why": f"Linked to {top['defects']} of {top['jobs']} defective jobs.", "owner": "Tool store"},
-            {"action": f"Test {tool} against a reference tool", "why": "Separates a faulty unit from a calibration lapse (they are confounded in the data).", "owner": "Quality"},
-            {"action": f"Trace other aircraft serviced with {tool}", "why": "Exposure outside this dataset is unknown.", "owner": "Planning"},
-        ]
-    elif top["factor"] == "Tool_Status":
-        acts.append({"action": f"Pull all tools with status '{top['level']}' from service", "why": "Linked to defects.", "owner": "Tool store"})
-    else:
-        acts.append({"action": f"Audit {top['label'].lower()} '{top['level']}'", "why": "Highest defect rate among pre-job factors.", "owner": "Quality"})
-    acts += [
-        {"action": "Re-inspect affected aircraft after rework", "why": "Confirm the belt is within limits once tension is reset.", "owner": "Line maintenance"},
-        {"action": "Add a calibration gate to the work-order system", "why": "Block job sign-off when the selected tool is out of calibration.", "owner": "MRO IT / Quality"},
-    ]
-    return acts

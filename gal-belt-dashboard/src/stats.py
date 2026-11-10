@@ -8,7 +8,7 @@ import pandas as pd
 from scipy import stats as sps
 from statsmodels.stats.multitest import multipletests
 
-from .data import CAL_STATUS, FACTOR_LABELS, LEADING, NORMAL_STATUS, SYMPTOMS, month_order
+from .data import FACTOR_LABELS, LEADING, SYMPTOMS, month_order
 
 SEED = 42
 ALPHA = 0.05
@@ -373,87 +373,27 @@ def mantel_haenszel(df: pd.DataFrame, top: dict | None, by: str) -> dict:
         return {"stat": float("nan"), "p": float("nan")}
 
 
-def symptom_profile(df: pd.DataFrame) -> dict:
-    """How often defects co-occur with abnormal symptoms (supports plausibility)."""
-    cols = [c for c in SYMPTOMS if c in df.columns]
-    d = df[df["defect"] == 1]
-    if not cols or d.empty:
-        return {"share_defects_with_symptoms": float("nan"), "share_ok_with_symptoms": float("nan")}
-    abnormal = df[cols].isin(["Abnormal", "High"]).all(axis=1)
-    ok = df[df["defect"] == 0]
-    return {"share_defects_with_symptoms": float(abnormal[d.index].mean()),
-            "share_ok_with_symptoms": float(abnormal[ok.index].mean()) if len(ok) else float("nan")}
-
-
-def bradford_hill(df: pd.DataFrame, top: dict | None) -> pd.DataFrame:
-    rows = []
+def stratified_conclusion(df: pd.DataFrame, top: dict | None, by: str = "Tool_ID") -> str:
+    """One generated sentence: does the station effect survive stratification, and what explains it?"""
+    res = stratify(df, "Maintenance_Station", by)
     if top is None:
-        return pd.DataFrame([{"criterion": "All", "status": "Not testable",
-                              "evidence": "No pre-job factor is associated with defects."}])
-    who = suspect_name(top)
-    # Strength
-    rr = top["relative_risk"]
-    rr_txt = "∞ (no defects without it)" if math.isinf(rr) else f"{rr:.1f}×"
-    if top["significant"] and (math.isinf(rr) or rr >= 3):
-        s = "Met"
-    elif top["significant"] or rr >= 2:
-        s = "Partially"
-    else:
-        s = "Not met"
-    rows.append({"criterion": "Strength", "status": s,
-                 "evidence": f"Relative risk {rr_txt}; Fisher q = {_fmt_p(top['q_bh'])}."})
-    # Consistency
-    parts, ok_all, n_cmp = [], True, 0
-    for by in ["Maintenance_Station", "Month"]:
-        if by == top["factor"]:
-            continue
-        w = suspect_within(df, top, by)
-        w = w[w["comparable"]]
-        n_cmp += len(w)
-        ok = int(w["suspect_higher"].sum())
-        ok_all &= ok == len(w)
-        parts.append(f"higher in {ok} of {len(w)} {FACTOR_LABELS[by].lower()}s")
-    s = "Not testable" if n_cmp == 0 else ("Met" if ok_all else "Partially")
-    rows.append({"criterion": "Consistency", "status": s, "evidence": f"Defect rate with {who}: " + "; ".join(parts) + "."})
-    # Temporality
-    rows.append({"criterion": "Temporality", "status": "Partially",
-                 "evidence": "Tool status is known before the job and the defect is found after it, "
-                             "but the data has no timestamps to prove the order."})
-    # Plausibility
-    sp = symptom_profile(df)
-    tool_related = top["factor"] in ("Tool_ID", "Tool_Status")
-    if tool_related and sp["share_defects_with_symptoms"] == 1.0:
-        s, ev = "Met", ("A tension tool out of calibration sets belt tension wrongly, which causes heat and vibration. "
-                        "100% of defects show high temperature and vibration, matching that mechanism.")
-    elif tool_related:
-        s, ev = "Partially", (f"Mechanism is plausible; {sp['share_defects_with_symptoms']:.0%} of defects "
-                              "show the expected heat and vibration signature.")
-    else:
-        s, ev = "Partially", "No clear engineering mechanism links this factor to belt damage."
-    rows.append({"criterion": "Plausibility", "status": s, "evidence": ev})
-    # Specificity
-    if top["share_of_defects"] == 1.0 and top["rate_rest"] == 0:
-        s, ev = "Met", f"All defects involve {who}, and no defects occur without it."
-    elif top["share_of_defects"] >= 0.5:
-        s, ev = "Partially", f"{top['share_of_defects']:.0%} of defects involve {who}; other causes also exist."
-    else:
-        s, ev = "Not met", f"Only {top['share_of_defects']:.0%} of defects involve {who}."
-    rows.append({"criterion": "Specificity", "status": s, "evidence": ev})
-    rows.append({"criterion": "Dose-response", "status": "Not testable",
-                 "evidence": "Needs days overdue for calibration or measured tension error; the data only has a yes/no status."})
-    rows.append({"criterion": "Experiment", "status": "Not testable",
-                 "evidence": "No intervention yet. Recalibrate the tool and compare against a reference tool to confirm."})
-    return pd.DataFrame(rows)
+        return res["interpretation"]
+    sus = suspect_mask(df, top)
+    parts = []
+    for s in levels(df, "Maintenance_Station"):
+        sel = df["Maintenance_Station"] == s
+        parts.append(f"{s}: {int((sel & sus).sum())} of {int(sel.sum())} jobs used {top['level']}, "
+                     f"{int(df.loc[sel, 'defect'].sum())} defects")
+    lead = res["interpretation"]
+    if res["effect_survives"]:
+        return f"{lead} ({'; '.join(parts)})."
+    return f"{lead} Station differences follow where {top['level']} was used ({'; '.join(parts)})."
 
 
-def confounding_note(df: pd.DataFrame, top: dict | None) -> str:
-    if top is None:
-        return "No suspect factor, so no confounding to report."
-    if not top["confounded_with"]:
-        return (f"{top['label']} '{top['level']}' does not perfectly overlap with any other pre-job factor, "
-                "so its effect can be separated from the others in this data.")
-    others = ", ".join(f"{FACTOR_LABELS[c['factor']].lower()} '{c['level']}'" for c in top["confounded_with"])
-    return (f"{top['label']} '{top['level']}' and {others} always occur together in this data. "
-            "The data therefore cannot tell whether the problem is this specific tool (a faulty unit) or the "
-            "missed calibration (a process lapse). Both point to the same action: take it out of service, recalibrate it, "
-            "then run a controlled test against a reference tool. If defects stop after recalibration, calibration was the cause.")
+def confounding_line(top: dict | None) -> str | None:
+    """Generated only when the suspect level overlaps exactly with another pre-job factor level."""
+    if top is None or not top["confounded_with"]:
+        return None
+    others = " and ".join(f"{FACTOR_LABELS[c['factor']].lower()} '{c['level']}'" for c in top["confounded_with"])
+    return (f"{top['label']} '{top['level']}' and {others} occur in exactly the same {top['jobs']} jobs: "
+            "their effects cannot be separated in this data.")

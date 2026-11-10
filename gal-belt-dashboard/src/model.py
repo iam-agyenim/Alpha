@@ -24,17 +24,6 @@ from .stats import bayes_rates
 PRE_JOB_FEATURES = list(LEADING)
 SYMPTOM_FEATURES = list(SYMPTOMS)
 
-FEATURE_REASONS = {
-    "Tool_ID": "Known when the job card is opened (which tool is issued).",
-    "Tool_Status": "Calibration status is on the tool's tag before the job starts.",
-    "Maintenance_Station": "Known when the job is planned.",
-    "Month": "Known when the job is planned.",
-    "Belt_Condition": "EXCLUDED: recorded at the same inspection that finds the defect (symptom).",
-    "Belt_Temperature": "EXCLUDED: measured at the same inspection that finds the defect (symptom).",
-    "Belt_Vibration": "EXCLUDED: measured at the same inspection that finds the defect (symptom).",
-    "Record_ID": "EXCLUDED: an identifier, carries no information about risk.",
-    "Aircraft_ID": "EXCLUDED: each aircraft appears once, so it cannot generalise.",
-}
 
 
 def features_for(df: pd.DataFrame, kind: str = "pre_job") -> list[str]:
@@ -226,8 +215,8 @@ def validate(df: pd.DataFrame, make_pipeline, features) -> dict:
         out["warnings"].append(f"Only {n_pos} defects: these scores are unstable and a few new records could change them a lot.")
     sep = separation_check(df, features)
     if sep:
-        out["warnings"].append("Perfect separation in this sample (" + "; ".join(sep) + "): a perfect score here "
-                               "shows the pattern is clean in these 30 jobs, not that the model will be perfect on new jobs.")
+        out["warnings"].append(f"Perfect separation in this sample ({'; '.join(sep)}): a perfect score shows the "
+                               f"pattern is clean in these {len(y)} jobs, not that the model will be perfect on new jobs.")
     return out
 
 
@@ -241,10 +230,7 @@ def leakage_demo(df: pd.DataFrame) -> dict | None:
     feats = features_for(df, "symptoms")
     if not feats:
         return None
-    return {"features": feats, "validation": validate(df, logistic_pipeline, feats),
-            "explanation": ("This model scores just as well, but it is useless: belt condition, temperature and "
-                            "vibration are recorded at the same inspection that finds the defect. It predicts the "
-                            "answer from the answer and gives no warning before the job starts.")}
+    return {"features": feats, "validation": validate(df, logistic_pipeline, feats)}
 
 
 # ----------------------------------------------------------------------------

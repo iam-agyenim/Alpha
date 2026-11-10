@@ -84,10 +84,15 @@ def test_alert_text(df):
     assert "11 of 30 jobs (37%)" in text and "Tool-05" in text and "0 of 19 with other tools" in text
 
 
-def test_bradford_hill(df):
-    bh = stats.bradford_hill(df, stats.detect_top_factor(df)).set_index("criterion")
-    assert bh.loc["Strength", "status"] == "Met"
-    assert bh.loc["Consistency", "status"] == "Met"
+def test_stratified_conclusion(df):
+    top = stats.detect_top_factor(df)
+    text = stats.stratified_conclusion(df, top)
+    assert "no effect" in text and "Tool-05" in text
+
+
+def test_confounding_line(df):
+    line = stats.confounding_line(stats.detect_top_factor(df))
+    assert "Tool-05" in line and "Needs Calibration" in line and "11 jobs" in line
 
 
 def test_affected_aircraft(df):
@@ -128,7 +133,7 @@ def test_no_defects(raw):
     stats.factor_ranking(d)
     stats.p_chart(d)
     stats.cochran_armitage(d)
-    stats.bradford_hill(d, None)
+    assert stats.confounding_line(None) is None
     for f in stats.factors_present(d):
         stats.chi_square_factor(d, f)
         stats.bayes_rates(d, f)
@@ -139,5 +144,5 @@ def test_sample_runs(raw):
     top = stats.detect_top_factor(d)
     stats.factor_ranking(d)
     stats.stratify(d, "Maintenance_Station", "Tool_ID")
-    stats.bradford_hill(d, top)
+    stats.stratified_conclusion(d, top)
     stats.mantel_haenszel(d, top, "Maintenance_Station")

@@ -28,7 +28,10 @@ def other_tool_faulty(raw: pd.DataFrame) -> pd.DataFrame:
     out = raw.copy()
     out["Tool_Status"] = "Normal"
     out["Belt_Defect"] = "No"
-    out.loc[out["Tool_ID"] == "Tool-02", ["Tool_Status", "Belt_Defect"]] = ["Overdue", "Y"]
+    out[["Belt_Condition", "Belt_Temperature", "Belt_Vibration"]] = "Normal"
+    bad = out["Tool_ID"] == "Tool-02"
+    out.loc[bad, ["Tool_Status", "Belt_Defect"]] = ["Overdue", "Y"]
+    out.loc[bad, ["Belt_Condition", "Belt_Temperature", "Belt_Vibration"]] = ["Abnormal", "High", "High"]
     return out
 
 
