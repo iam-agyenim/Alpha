@@ -23,6 +23,25 @@ The bundled file `data/gal_belt_data.csv` is the GAL Case 3 data. Upload another
 
 **Deploy:** on [share.streamlit.io](https://share.streamlit.io), set the main file path to `gal-belt-dashboard/app.py` and the Python version to 3.12.
 
+## Real GAL data (release v2)
+
+Upload either v2 file from the sidebar and the app switches to v2 mode automatically:
+
+| File | What the dashboard shows |
+|---|---|
+| `case_3_test_inputs.csv` (2,000 unlabelled episodes) | Model risk for every episode and aircraft, the aircraft board with tension difference and readings, predicted defect rate by tool, batch and month, an inspection list, and a **Submission CSV** download (`case_3_predictions.csv`, format-checked on the page) |
+| `Case_3_Train_Participants.xlsx` (10,000 labelled episodes) | The same, plus actual defect rates next to the predictions and the model's score on the file (optimistic, because the model was trained on it) |
+
+The model is trained offline in `Backend/` (`python -m case3.train`, about 6 minutes) and saved to
+`Backend/output/model.joblib`; the dashboard only loads it, so scoring takes under a second. The file format is
+detected from its columns; the 30-row sample keeps the original view.
+
+To open a file by default when running locally (useful for a demo), set `BELT_DATA`:
+
+```bash
+BELT_DATA=../Backend/data/case_3_test_inputs.csv streamlit run app.py
+```
+
 ## Layout of the dashboard
 
 A header with the computed alert banner and four KPIs (total jobs, defects, defect rate with the suspect tool, defect rate with other tools), then one tab per question. Each tab has a one-line computed answer above a single main visual.

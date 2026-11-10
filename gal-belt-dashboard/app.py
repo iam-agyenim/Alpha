@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import math
+import os
 
 import pandas as pd
 import streamlit as st
@@ -85,6 +86,7 @@ st.markdown("<style>" + _PALETTE + """
   .badge { display:inline-block; margin-left:6px; padding:0 7px; border-radius:5px; font-size:.72rem;
            font-weight:700; background:var(--amber-t); border:1px solid var(--amber); }
   .board-note { font-size:.8rem; opacity:.65; margin:-6px 0 8px 0; }
+  td.tbad { color:var(--red); font-weight:700; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -125,10 +127,31 @@ with st.sidebar:
         med_t = high_t
     st.caption("Prototype. Not for operational aircraft use.")
 
-res = load_cached(upload.getvalue() if upload else None, upload.name if upload else None, str(data_mod.DEFAULT_DATA))
+# BELT_DATA lets a local run open a file by default (e.g. the GAL test inputs) instead of the bundled sample.
+default_path = os.environ.get("BELT_DATA") or str(data_mod.DEFAULT_DATA)
+content, name = (upload.getvalue(), upload.name) if upload else (None, default_path)
+
+
+@st.cache_data(show_spinner=False)
+def read_v2(content: bytes | None, name: str):
+    """The raw table if this is a release-v2 file (the real GAL Case 3 data), else None."""
+    from src import v2
+    try:
+        raw = v2.read_raw(content if content is not None else name, name)
+    except Exception:
+        return None
+    return raw if v2.is_v2(raw) else None
+
+
+raw_v2 = read_v2(content, name)
+res = None if raw_v2 is not None else load_cached(content, upload.name if upload else None, default_path)
 
 st.markdown('<div class="eyebrow">Case 3 · Find the B787 fleet-wide belt problem</div>'
             '<div class="deck-title">Belt Defect <b>Investigation</b></div>', unsafe_allow_html=True)
+if raw_v2 is not None:
+    import v2_page
+    v2_page.render(raw_v2, os.path.basename(name))
+    st.stop()
 if not res.ok:
     if res.missing:
         st.error(f"Missing required columns: **{', '.join(res.missing)}** (required: {', '.join(REQUIRED)}).")

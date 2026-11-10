@@ -30,6 +30,7 @@ A full run takes about 6 minutes on a laptop. Competition data is not committed 
 | `report.json` | Threshold, validation scores, test prediction summary, format-check result |
 | `threshold_curve.csv` | F1 at every threshold for each validation view |
 | `feature_importance.csv` | CatBoost importance, averaged over seeds |
+| `model.joblib` | The final trained model and threshold, loaded by the dashboard (`gal-belt-dashboard/src/v2.py`) |
 
 ## Method
 

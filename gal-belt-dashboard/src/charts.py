@@ -2,6 +2,7 @@
 green = normal/low, navy = neutral emphasis, grey = context. Every coloured mark also carries a text label."""
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -42,14 +43,16 @@ def _pct(v):
     return "n/a" if pd.isna(v) else f"{v:.0%}"
 
 
-def rate_bar(rates: pd.DataFrame, title: str, axis: str, highlight: str | None = None, big=False) -> go.Figure:
+def rate_bar(rates: pd.DataFrame, title: str, axis: str, highlight: str | None = None, big=False,
+             y_label: str = "Defect rate (% of jobs)", auto_range: bool = False) -> go.Figure:
     colours = [RED if lvl == highlight else NAVY for lvl in rates["level"]]
     text = [f"{d} of {n} ({_pct(r)})" for d, n, r in zip(rates["defects"], rates["jobs"], rates["rate"])]
     fig = go.Figure(go.Bar(x=rates["level"], y=rates["rate"] * 100, marker_color=colours, text=text,
                            textposition="outside", cliponaxis=False,
                            hovertemplate="%{x}<br>%{text} of jobs had a defect<extra></extra>"))
-    fig.update_yaxes(range=[0, 115], ticksuffix="%")
-    return style(fig, title, axis, "Defect rate (% of jobs)", big)
+    top = 115 if not auto_range else max(1.0, float(rates["rate"].max()) * 100 * 1.3)
+    fig.update_yaxes(range=[0, top], ticksuffix="%")
+    return style(fig, title, axis, y_label, big)
 
 
 def heatmap(table: pd.DataFrame, title: str, x: str, y: str, scale, fmt="{:.0f}", big=False,
@@ -73,4 +76,32 @@ def monthly_chart(m: pd.DataFrame, suspect: str, title: str, big=False) -> go.Fi
     fig.update_yaxes(range=[0, m["jobs"].max() * 1.2])
     return style(fig, title, "Month", "Number of jobs", big)
 
+
+def importance_bar(imp: pd.Series, title: str, labels: dict | None = None, top: int = 10) -> go.Figure:
+    """Horizontal bars of model feature importance, strongest at the top."""
+    s = imp.head(top)[::-1]
+    names = [(labels or {}).get(k, k.replace("_", " ")) for k in s.index]
+    fig = go.Figure(go.Bar(x=s.to_numpy(), y=names, orientation="h", marker_color=NAVY,
+                           text=[f"{v:.1f}" for v in s.to_numpy()], textposition="outside", cliponaxis=False,
+                           hovertemplate="%{y}: %{x:.1f}<extra></extra>"))
+    fig.update_xaxes(range=[0, float(s.max()) * 1.2], showticklabels=False)
+    return style(fig, title, "Share of the model's decisions (%)", None)
+
+
+def monthly_rate_chart(m: pd.DataFrame, title: str) -> go.Figure:
+    """Defect rate per month: predicted by the model, and actual when the file has answers."""
+    fig = go.Figure()
+    fig.add_bar(x=m["Month"], y=m["predicted_rate"] * 100, name="Predicted defect rate", marker_color=NAVY,
+                text=[f"{v:.0%}" for v in m["predicted_rate"]], textposition="outside", cliponaxis=False,
+                customdata=np.stack([m["predicted"], m["jobs"]], axis=1),
+                hovertemplate="%{x}: %{customdata[0]} of %{customdata[1]} jobs predicted<extra></extra>")
+    top = m["predicted_rate"].max()
+    if "actual_rate" in m:
+        fig.add_scatter(x=m["Month"], y=m["actual_rate"] * 100, name="Actual defect rate", mode="lines+markers",
+                        line=dict(color=RED, width=3), marker=dict(size=8),
+                        customdata=np.stack([m["actual"], m["jobs"]], axis=1),
+                        hovertemplate="%{x}: %{customdata[0]} of %{customdata[1]} jobs defective<extra></extra>")
+        top = max(top, m["actual_rate"].max())
+    fig.update_yaxes(range=[0, max(1.0, float(top) * 100 * 1.3)], ticksuffix="%")
+    return style(fig, title, "Month", "Defect rate (% of jobs)")
 

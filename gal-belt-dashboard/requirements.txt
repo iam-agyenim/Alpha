@@ -7,3 +7,5 @@ scikit-learn==1.9.1
 plotly==7.1.0
 openpyxl==3.1.5
 pytest==9.2.0
+lightgbm==4.7.0
+catboost==1.2.10
