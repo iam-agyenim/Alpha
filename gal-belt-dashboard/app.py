@@ -5,6 +5,7 @@ Background, methods and root-cause narrative live in PRESENTATION_NOTES.md, not 
 """
 from __future__ import annotations
 
+import html
 import math
 
 import pandas as pd
@@ -29,6 +30,47 @@ st.markdown("""
   .band-Medium { background:rgba(224,161,0,0.16); border-left:8px solid #E0A100; }
   .band-Low { background:rgba(12,163,12,0.14); border-left:8px solid #0ca30c; }
   .band-title { font-size:1.7rem; font-weight:700; margin:0; }
+
+  /* Fleet alert card */
+  .fleet-alert { border:2px solid #c0392b; border-radius:12px; padding:20px 26px; margin:4px 0 18px 0;
+                 background:rgba(192,57,43,0.06); box-shadow:0 6px 18px rgba(0,0,0,0.08); }
+  .fleet-alert.ok { border-color:#2e8b57; background:rgba(46,139,87,0.07); }
+  .fa-top { display:flex; gap:18px; align-items:baseline; flex-wrap:wrap; margin-bottom:6px; }
+  .fa-label { color:#c0392b; font-weight:800; letter-spacing:.04em; font-size:1.05rem; }
+  .fleet-alert.ok .fa-label { color:#2e8b57; }
+  .fa-tag { color:#b08d3c; font-weight:700; letter-spacing:.06em; font-size:.8rem; text-transform:uppercase; }
+  .fa-head { font-size:1.55rem; font-weight:800; line-height:1.25; margin:2px 0 6px 0; }
+  .fa-sub { font-size:1.08rem; opacity:.85; }
+  .fa-evidence { font-size:.88rem; opacity:.65; margin-top:10px; border-top:1px solid rgba(128,128,128,.25);
+                 padding-top:8px; }
+
+  /* Fleet at a glance tiles */
+  .tiles { display:flex; flex-wrap:wrap; gap:6px; margin:4px 0 14px 0; }
+  .tile { width:54px; padding:6px 0 5px 0; border-radius:7px; text-align:center; font-size:.78rem; font-weight:700;
+          border:1px solid rgba(128,128,128,.25); line-height:1.15; }
+  .tile small { display:block; font-weight:500; opacity:.7; font-size:.62rem; }
+  .tile.s-High { background:rgba(192,57,43,0.22); border-color:#c0392b; }
+  .tile.s-Medium { background:rgba(214,137,16,0.22); border-color:#d68910; }
+  .tile.s-Normal { background:rgba(46,139,87,0.14); border-color:rgba(46,139,87,.6); }
+
+  /* Fleet status board */
+  .board-wrap { max-height:460px; overflow:auto; border-radius:8px; border:1px solid rgba(128,128,128,.25); }
+  table.board { width:100%; min-width:760px; border-collapse:collapse; font-size:.95rem; }
+  table.board td, table.board th { white-space:nowrap; }
+  table.board thead th { position:sticky; top:0; background:#3457a0; color:#fff; text-align:left;
+                         padding:11px 14px; font-weight:700; }
+  table.board td { padding:10px 14px; border-top:1px solid rgba(128,128,128,.18); vertical-align:middle; }
+  table.board tbody tr:nth-child(even) td { background:rgba(52,87,160,0.07); }
+  .ac { font-weight:800; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:7px; vertical-align:middle; }
+  .d-High { background:#c0392b; } .d-Medium { background:#d68910; } .d-Normal { background:#2e8b57; }
+  .st { font-weight:700; }
+  .chip { display:inline-block; padding:2px 8px; margin:1px 4px 1px 0; border-radius:999px; font-size:.78rem;
+          font-weight:600; border:1px solid rgba(128,128,128,.3); opacity:.75; }
+  .chip.bad { background:rgba(192,57,43,0.18); border-color:#c0392b; color:#d64545; opacity:1; }
+  .badge { display:inline-block; margin-left:6px; padding:1px 7px; border-radius:5px; font-size:.72rem;
+           font-weight:700; background:rgba(214,137,16,0.25); border:1px solid #d68910; }
+  .why { font-size:.82rem; opacity:.7; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -125,7 +167,108 @@ def pct(v):
 
 st.caption(f"Source: {res.source} · {S['records']} records · {S['aircraft']} aircraft · "
            f"{S['defects']} defects · months: {', '.join(S['months'])}")
-st.markdown(f'<div class="alert">⚠️ <b>ALERT:</b> {A["alert"]}</div>', unsafe_allow_html=True)
+
+# ----------------------------------------------------------------------------- fleet alert + status board
+
+FLEET = impact.fleet_status(df, top)
+SYM_PRESENT = [c for c in SYMPTOMS if c in df.columns]
+SYM_SHORT = {"Belt_Condition": "Condition", "Belt_Temperature": "Temperature", "Belt_Vibration": "Vibration"}
+fleet_type = "B787 " if FLEET["Aircraft_ID"].astype(str).str.upper().str.startswith("B787").all() else ""
+
+
+def contributing_factor(top: dict | None) -> str:
+    if top is None:
+        return "No pre-job factor stands out in this data yet."
+    where = {"Tool_ID": f"when {stats.suspect_name(top)} is used",
+             "Tool_Status": f"when tools in “{top['level']}” status are used",
+             "Maintenance_Station": f"at {top['level']}",
+             "Month": f"in {top['level']}"}[top["factor"]]
+    verb = "are more common" if top["significant"] else "may be more common (not significant after correction)"
+    return f"Possible contributing factor: belt defects {verb} {where}."
+
+
+n_abnormal = int((FLEET["Abnormal_readings"] > 0).sum())
+n_high = int((FLEET["Status"] == "High Risk").sum())
+if SYM_PRESENT:
+    flagged = n_abnormal
+    headline = (f"{flagged} {fleet_type}aircraft {'has' if flagged == 1 else 'have'} abnormal belt measurements."
+                if flagged else f"No {fleet_type}aircraft have abnormal belt measurements.")
+else:
+    flagged = n_high
+    headline = (f"{flagged} {fleet_type}aircraft {'is' if flagged == 1 else 'are'} at high risk of a belt defect."
+                if flagged else f"No {fleet_type}aircraft are at high risk of a belt defect.")
+ok_cls = "" if flagged else " ok"
+st.markdown(
+    f'<div class="fleet-alert{ok_cls}"><div class="fa-top"><span class="fa-label">● FLEET ALERT</span>'
+    f'<span class="fa-tag">{html.escape(res.source)} · {S["aircraft"]} aircraft</span></div>'
+    f'<div class="fa-head">{html.escape(headline)}</div>'
+    f'<div class="fa-sub">{html.escape(contributing_factor(top))}</div>'
+    f'<div class="fa-evidence">{html.escape(A["alert"])}</div></div>', unsafe_allow_html=True)
+
+counts = FLEET["Status"].value_counts().reindex(impact.STATUS_ORDER, fill_value=0)
+STATUS_KEY = {"High Risk": "High", "Medium": "Medium", "Normal": "Normal"}
+
+st.markdown("##### Fleet at a glance")
+tiles = "".join(
+    f'<div class="tile s-{STATUS_KEY[r.Status]}" title="{html.escape(str(r.Aircraft_ID))} · {r.Status} · '
+    f'{html.escape(str(r.Tool_ID))}">{html.escape(str(r.Aircraft_ID).split("-")[-1])}'
+    f'<small>{html.escape(str(r.Tool_ID).replace("Tool-", "T-"))}</small></div>'
+    for r in FLEET.sort_values("Aircraft_ID").itertuples())
+st.html(f'<div class="tiles">{tiles}</div>')  # data cells, like st.dataframe
+
+options = ["All"] + impact.STATUS_ORDER
+pick = st.segmented_control(
+    "Show", options, default="All", key="fleet_filter",
+    format_func=lambda o: f"All ({len(FLEET)})" if o == "All" else f"● {o} ({counts[o]})") or "All"
+board = FLEET if pick == "All" else FLEET[FLEET["Status"] == pick]
+
+
+def readings_html(r) -> str:
+    chips = []
+    for c in SYM_PRESENT:
+        val = str(r[c])
+        bad = val in impact.ABNORMAL_VALUES
+        chips.append(f'<span class="chip{" bad" if bad else ""}" title="{SYM_SHORT[c]}: {html.escape(val)}">'
+                     f'{SYM_SHORT[c]}{": " + html.escape(val) if bad else ""}</span>')
+    return "".join(chips) or '<span class="why">not recorded</span>'
+
+
+def why_text(r) -> str:
+    if r["Defect"] == "Yes":
+        return "Defect recorded"
+    if r["Abnormal_readings"] >= 2:
+        return f"{r['Abnormal_readings']} abnormal readings"
+    if r["Abnormal_readings"] == 1:
+        return "1 abnormal reading"
+    if r["Suspect"]:
+        return f"Serviced with suspect factor ({html.escape(str(top['level']))})"
+    if r["Tool_Status"] != NORMAL_STATUS:
+        return "Tool not in Normal status"
+    return "All readings normal"
+
+
+head_cells = ["Aircraft", "Belt Status"] + (["Belt Readings"] if SYM_PRESENT else []) + ["Tool", "Station", "Month"]
+rows_html = []
+for _, r in board.iterrows():
+    key = STATUS_KEY[r["Status"]]
+    badge = (f'<span class="badge">{html.escape(str(r["Tool_Status"]))}</span>'
+             if r["Tool_Status"] != NORMAL_STATUS else "")
+    cells = [f'<td class="ac">{html.escape(str(r["Aircraft_ID"]))}</td>',
+             f'<td><span class="dot d-{key}"></span><span class="st">{r["Status"]}</span>'
+             f'<br><span class="why">{why_text(r)}</span></td>']
+    if SYM_PRESENT:
+        cells.append(f"<td>{readings_html(r)}</td>")
+    cells += [f'<td>{html.escape(str(r["Tool_ID"]))}{badge}</td>',
+              f'<td>{html.escape(str(r["Station"]))}</td>', f'<td>{html.escape(str(r["Month"]))}</td>']
+    rows_html.append("<tr>" + "".join(cells) + "</tr>")
+st.html(
+    '<div class="board-wrap"><table class="board"><thead><tr>'
+    + "".join(f"<th>{h}</th>" for h in head_cells) + "</tr></thead><tbody>"
+    + ("".join(rows_html) or f'<tr><td colspan="{len(head_cells)}">No aircraft in this group.</td></tr>')
+    + "</tbody></table></div>")
+st.caption("Belt Status: High Risk = defect recorded or 2+ abnormal readings · Medium = 1 abnormal reading, "
+           "or serviced with the suspect factor or a tool not in Normal status · Normal = everything else.")
+st.write("")
 
 others = df[~sus]
 k = st.columns(5)
