@@ -1,0 +1,80 @@
+{
+  "threshold": 0.16,
+  "features": [
+    "Maintenance_Station",
+    "Technician_ID",
+    "Tool_ID",
+    "Belt_Supplier",
+    "Belt_Batch_ID",
+    "High_Load_Hours_Last_30_Days",
+    "Hot_Operation_Days_Last_30_Days",
+    "Peak_Operating_Temperature_C",
+    "Days_Since_Tool_Calibration",
+    "Tool_Uses_Since_Calibration",
+    "Belt_Age_Hours",
+    "Cycles_Since_Belt_Install",
+    "Belt_Target_Tension_N",
+    "Belt_Measured_Tension_N",
+    "Ambient_Temperature_C",
+    "Relative_Humidity_Pct",
+    "Engine_Load_Ratio",
+    "Alignment_Offset_mm",
+    "Contamination_Index",
+    "Operating_Hours_Last_30_Days",
+    "Belt_Temperature_C",
+    "Belt_Vibration_mm_s",
+    "Belt_Slip_Pct",
+    "Tension_Diff_N",
+    "Tension_Diff_Pct",
+    "Abs_Tension_Diff_Pct",
+    "Belt_Minus_Ambient_C",
+    "High_Load_Share",
+    "Tool_Uses_Per_Day",
+    "Hours_Per_Cycle",
+    "Vib_x_Temp",
+    "Slip_x_AbsTension",
+    "N_Missing"
+  ],
+  "validation": {
+    "cv_oof": {
+      "rows": 10000,
+      "defects": 269,
+      "f1": 0.7279,
+      "precision": 0.6708,
+      "recall": 0.7955,
+      "predicted_yes": 319,
+      "best_possible_f1": 0.7319,
+      "pr_auc": 0.8216,
+      "roc_auc": 0.9903
+    },
+    "unseen_summer_2024": {
+      "rows": 2460,
+      "defects": 79,
+      "f1": 0.6901,
+      "precision": 0.6413,
+      "recall": 0.7468,
+      "predicted_yes": 92,
+      "best_possible_f1": 0.6901,
+      "pr_auc": 0.7688,
+      "roc_auc": 0.9842
+    },
+    "unseen_2025": {
+      "rows": 2680,
+      "defects": 67,
+      "f1": 0.6993,
+      "precision": 0.6579,
+      "recall": 0.7463,
+      "predicted_yes": 76,
+      "best_possible_f1": 0.7067,
+      "pr_auc": 0.7434,
+      "roc_auc": 0.9912
+    }
+  },
+  "test": {
+    "rows": 2000,
+    "predicted_yes": 129,
+    "predicted_yes_rate": 0.0645,
+    "mean_probability": 0.0388,
+    "format_problems": []
+  }
+}
