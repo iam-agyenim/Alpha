@@ -18,58 +18,74 @@ from src.data import FACTOR_LABELS, IDS, NORMAL_STATUS, REQUIRED, SYMPTOMS, load
 
 st.set_page_config(page_title="B787 Belt Defect Investigation", page_icon="✈️", layout="wide")
 
-st.markdown("""
-<style>
+def _rgba(hex_colour: str, alpha: float) -> str:
+    h = hex_colour.lstrip("#")
+    return f"rgba({int(h[0:2], 16)},{int(h[2:4], 16)},{int(h[4:6], 16)},{alpha})"
+
+
+# One palette for the whole page: the same constants drive the Plotly charts (src/charts.py), these CSS rules
+# and the Streamlit theme (.streamlit/config.toml). All taken from the GAL x MoIAT briefing deck.
+_PALETTE = (
+    ":root {"
+    f"--red:{ch.RED}; --amber:{ch.AMBER}; --green:{ch.GREEN}; --navy:{ch.NAVY}; --gold:{ch.GOLD};"
+    f"--red-t:{_rgba(ch.RED, .14)}; --amber-t:{_rgba(ch.AMBER, .18)}; --green-t:{_rgba(ch.GREEN, .14)};"
+    f"--navy-t:{_rgba(ch.NAVY, .08)}; --line:{_rgba(ch.GREY, .35)};"
+    "}"
+)
+st.markdown("<style>" + _PALETTE + """
   html, body, [class*="css"] { font-size: 16px; }
-  /* Translucent tints + inherited text colour, so every box reads in both light and dark theme. */
-  .alert { background:rgba(208,59,59,0.14); border-left:6px solid #d03b3b; padding:14px 18px; border-radius:6px;
-           color:inherit; font-size:1.08rem; margin:6px 0 12px 0; }
-  .card { border:1px solid rgba(128,128,128,0.35); border-radius:8px; padding:14px 18px;
-          background:rgba(128,128,128,0.06); color:inherit; }
-  .band-High { background:rgba(208,59,59,0.14); border-left:8px solid #d03b3b; }
-  .band-Medium { background:rgba(224,161,0,0.16); border-left:8px solid #E0A100; }
-  .band-Low { background:rgba(12,163,12,0.14); border-left:8px solid #0ca30c; }
+
+  /* Page header in the deck's style: gold rule + small-caps eyebrow, title with one word in navy */
+  .eyebrow { display:flex; align-items:center; gap:12px; color:var(--navy); font-size:.85rem; font-weight:600;
+             letter-spacing:.08em; text-transform:uppercase; margin:0 0 2px 0; }
+  .eyebrow::before { content:""; width:44px; height:2px; background:var(--gold); }
+  .deck-title { font-size:2.5rem; font-weight:500; line-height:1.15; margin:0 0 4px 0; }
+  .deck-title b { color:var(--navy); font-weight:800; }
+
+  .card { border:1px solid var(--line); border-radius:10px; padding:14px 18px; background:var(--navy-t); color:inherit; }
+  .band-High { background:var(--red-t); border:1px solid var(--red); }
+  .band-Medium { background:var(--amber-t); border:1px solid var(--amber); }
+  .band-Low { background:var(--green-t); border:1px solid var(--green); }
   .band-title { font-size:1.7rem; font-weight:700; margin:0; }
 
-  /* Fleet alert card */
-  .fleet-alert { border:2px solid #c0392b; border-radius:12px; padding:20px 26px; margin:4px 0 18px 0;
-                 background:rgba(192,57,43,0.06); box-shadow:0 6px 18px rgba(0,0,0,0.08); }
-  .fleet-alert.ok { border-color:#2e8b57; background:rgba(46,139,87,0.07); }
+  /* Fleet alert card (deck: white card, red rounded border, soft shadow) */
+  .fleet-alert { border:2px solid var(--red); border-radius:12px; padding:20px 26px; margin:4px 0 18px 0;
+                 background:transparent; box-shadow:0 6px 18px rgba(0,0,0,0.08); }
+  .fleet-alert.ok { border-color:var(--green); }
   .fa-top { display:flex; gap:18px; align-items:baseline; flex-wrap:wrap; margin-bottom:6px; }
-  .fa-label { color:#c0392b; font-weight:800; letter-spacing:.04em; font-size:1.05rem; }
-  .fleet-alert.ok .fa-label { color:#2e8b57; }
-  .fa-tag { color:#b08d3c; font-weight:700; letter-spacing:.06em; font-size:.8rem; text-transform:uppercase; }
+  .fa-label { color:var(--red); font-weight:800; letter-spacing:.04em; font-size:1.05rem; }
+  .fleet-alert.ok .fa-label { color:var(--green); }
+  .fa-tag { color:var(--gold); font-weight:700; letter-spacing:.06em; font-size:.8rem; text-transform:uppercase; }
   .fa-head { font-size:1.55rem; font-weight:800; line-height:1.25; margin:2px 0 6px 0; }
   .fa-sub { font-size:1.08rem; opacity:.85; }
-  .fa-evidence { font-size:.88rem; opacity:.65; margin-top:10px; border-top:1px solid rgba(128,128,128,.25);
-                 padding-top:8px; }
+  .fa-evidence { font-size:.88rem; opacity:.65; margin-top:10px; border-top:1px solid var(--line); padding-top:8px; }
 
   /* Fleet at a glance tiles */
   .tiles { display:flex; flex-wrap:wrap; gap:6px; margin:4px 0 14px 0; }
   .tile { width:54px; padding:6px 0 5px 0; border-radius:7px; text-align:center; font-size:.78rem; font-weight:700;
-          border:1px solid rgba(128,128,128,.25); line-height:1.15; }
+          border:1px solid var(--line); line-height:1.15; }
   .tile small { display:block; font-weight:500; opacity:.7; font-size:.62rem; }
-  .tile.s-High { background:rgba(192,57,43,0.22); border-color:#c0392b; }
-  .tile.s-Medium { background:rgba(214,137,16,0.22); border-color:#d68910; }
-  .tile.s-Normal { background:rgba(46,139,87,0.14); border-color:rgba(46,139,87,.6); }
+  .tile.s-High { background:var(--red-t); border-color:var(--red); }
+  .tile.s-Medium { background:var(--amber-t); border-color:var(--amber); }
+  .tile.s-Normal { background:var(--green-t); border-color:var(--green); }
 
-  /* Fleet status board */
-  .board-wrap { max-height:460px; overflow:auto; border-radius:8px; border:1px solid rgba(128,128,128,.25); }
+  /* Fleet status board (deck: navy header, light-blue zebra rows) */
+  .board-wrap { max-height:460px; overflow:auto; border-radius:8px; border:1px solid var(--line); }
   table.board { width:100%; min-width:760px; border-collapse:collapse; font-size:.95rem; }
   table.board td, table.board th { white-space:nowrap; }
-  table.board thead th { position:sticky; top:0; background:#3457a0; color:#fff; text-align:left;
+  table.board thead th { position:sticky; top:0; background:var(--navy); color:#fff; text-align:left;
                          padding:11px 14px; font-weight:700; }
-  table.board td { padding:10px 14px; border-top:1px solid rgba(128,128,128,.18); vertical-align:middle; }
-  table.board tbody tr:nth-child(even) td { background:rgba(52,87,160,0.07); }
+  table.board td { padding:10px 14px; border-top:1px solid var(--line); vertical-align:middle; }
+  table.board tbody tr:nth-child(even) td { background:var(--navy-t); }
   .ac { font-weight:800; }
   .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:7px; vertical-align:middle; }
-  .d-High { background:#c0392b; } .d-Medium { background:#d68910; } .d-Normal { background:#2e8b57; }
+  .d-High { background:var(--red); } .d-Medium { background:var(--amber); } .d-Normal { background:var(--green); }
   .st { font-weight:700; }
   .chip { display:inline-block; padding:2px 8px; margin:1px 4px 1px 0; border-radius:999px; font-size:.78rem;
-          font-weight:600; border:1px solid rgba(128,128,128,.3); opacity:.75; }
-  .chip.bad { background:rgba(192,57,43,0.18); border-color:#c0392b; color:#d64545; opacity:1; }
+          font-weight:600; border:1px solid var(--line); opacity:.75; }
+  .chip.bad { background:var(--red-t); border-color:var(--red); color:var(--red); opacity:1; }
   .badge { display:inline-block; margin-left:6px; padding:1px 7px; border-radius:5px; font-size:.72rem;
-           font-weight:700; background:rgba(214,137,16,0.25); border:1px solid #d68910; }
+           font-weight:700; background:var(--amber-t); border:1px solid var(--amber); }
   .why { font-size:.82rem; opacity:.7; }
 </style>
 """, unsafe_allow_html=True)
@@ -130,7 +146,8 @@ with st.sidebar:
 
 res = load_cached(upload.getvalue() if upload else None, upload.name if upload else None, str(data_mod.DEFAULT_DATA))
 
-st.title("B787 Engine Belt Defect Investigation")
+st.markdown('<div class="eyebrow">Case 3 · Find the B787 fleet-wide belt problem</div>'
+            '<div class="deck-title">Belt Defect <b>Investigation</b></div>', unsafe_allow_html=True)
 if not res.ok:
     if res.missing:
         st.error(f"Missing required columns: **{', '.join(res.missing)}** (required: {', '.join(REQUIRED)}).")
@@ -290,13 +307,13 @@ tabs = st.tabs(["Overview", "Why", "When", "Causation", "Prediction", "Action pl
 def style_records(d: pd.DataFrame):
     def row_style(r):
         # Translucent tints (no fixed text colour) stay readable in light and dark theme.
-        return ["background-color:rgba(208,59,59,0.18)" if r.get("Belt_Defect") == "Yes" else ""] * len(r)
+        return [f"background-color:{_rgba(ch.RED, .14)}" if r.get("Belt_Defect") == "Yes" else ""] * len(r)
 
     def cell(v):
         if isinstance(v, str) and v not in ("", NORMAL_STATUS) and v in set(df["Tool_Status"]):
-            return "background-color:rgba(224,161,0,0.35); font-weight:600"
+            return f"background-color:{_rgba(ch.AMBER, .25)}; font-weight:600"
         if v in ("Abnormal", "High"):
-            return "color:#d64545; font-weight:600"
+            return f"color:{ch.RED}; font-weight:600"
         return ""
 
     return d.style.apply(row_style, axis=1).map(cell)

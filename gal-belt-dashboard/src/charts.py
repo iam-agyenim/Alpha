@@ -8,28 +8,33 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-RED = "#d03b3b"
-AMBER = "#E0A100"
-GREEN = "#0ca30c"
-NAVY = "#1F3A5F"
-GREY = "#9aa3ad"
-INK = "#1f2933"
-MUTED = "#52606d"
-GRID = "#e1e0d9"
+# Palette taken from the GAL x MoIAT briefing deck (Case 3 "Expected Dashboard" slide). app.py's CSS uses the
+# same values, so charts, the fleet alert card and the status board read as one system.
+RED = "#C0392B"      # High Risk / defect
+AMBER = "#D97706"    # Medium / needs calibration
+GREEN = "#2E8B57"    # Normal
+NAVY = "#265AA4"     # deck accent1: neutral emphasis
+GOLD = "#AF8C45"     # deck accent2: labels and reference lines
+GREY = "#8D9091"     # deck accent3: context
+INK = "#404042"      # deck dk1: text
+MUTED = "#5F6264"    # deck accent4: secondary text
+GRID = "#E3E5E8"     # deck accent6: gridlines
+FONT = "Cairo, Helvetica, Arial, sans-serif"
 
-SEQ_RED = [[0, "#fbeaea"], [0.5, "#e98a8a"], [1, "#9b1c1c"]]
-SEQ_NAVY = [[0, "#eef2f7"], [0.5, "#7d97b8"], [1, "#1F3A5F"]]
+SEQ_RED = [[0, "#FBEAE8"], [0.5, "#E08A80"], [1, RED]]
+SEQ_NAVY = [[0, "#EAF0F8"], [0.5, "#8BA6CF"], [1, NAVY]]
 
 
 def style(fig: go.Figure, title: str, x: str | None = None, y: str | None = None, big: bool = False,
           height: int | None = None) -> go.Figure:
     base = 18 if big else 15
     fig.update_layout(
-        title=dict(text=title, font=dict(size=base + 5, color=INK), x=0, xanchor="left"),
-        font=dict(size=base, color=INK, family="Inter, Helvetica, Arial, sans-serif"),
+        title=dict(text=f"<b>{title}</b>", font=dict(size=base + 4, color=INK, family=FONT), x=0, xanchor="left"),
+        font=dict(size=base, color=INK, family=FONT),
         plot_bgcolor="white", paper_bgcolor="white",
-        margin=dict(l=80, r=30, t=90, b=80), height=height or (520 if big else 400),
-        legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1, font=dict(size=base)),
+        margin=dict(l=80, r=30, t=70, b=80), height=height or (520 if big else 400),
+        # Legend under the plot: it can never collide with a long title, whatever the screen width.
+        legend=dict(orientation="h", yanchor="top", y=-0.22, xanchor="left", x=0, font=dict(size=base)),
         hoverlabel=dict(font_size=base),
         uniformtext=dict(minsize=base - 2, mode="show"),
     )
