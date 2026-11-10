@@ -23,17 +23,18 @@ The bundled file `data/gal_belt_data.csv` is the GAL Case 3 data. Upload another
 
 **Deploy:** on [share.streamlit.io](https://share.streamlit.io), set the main file path to `gal-belt-dashboard/app.py` and the Python version to 3.12.
 
-## Tabs
+## Layout of the dashboard
 
-| Tab | Shows |
-|---|---|
-| Overview | Alert, KPIs, defect rate by tool, Pareto chart, filterable records |
-| Why | Factor ranking (rate, relative risk, Fisher p, BH q, Cramér's V), Bayesian intervals, tool × station heatmaps |
-| When | Monthly jobs vs defects, p-chart, Cochran-Armitage trend test |
-| Causation | Station rates within each tool and tool status, CMH test, confounding check |
-| Prediction | Pre-job risk checker, learned decision-tree rule, logistic and Firth models, leave-one-out validation, leakage comparison |
-| Action plan | Aircraft to inspect (CSV download), calibration-gate impact, cost estimate from sidebar assumptions |
-| Data quality | Normalisation log, column profile |
+A header with the computed alert banner and four KPIs (total jobs, defects, defect rate with the suspect tool, defect rate with other tools), then one tab per question. Each tab has a one-line computed answer above a single main visual.
+
+| Tab | Answer line | Main visual |
+|---|---|---|
+| Why are defects happening? | Suspect factor, its share of defects, Fisher p | Defect rate by tool, plus a tool × station heatmap with a computed "is it the station?" line |
+| When do defects happen? | Whether any month is outside the p-chart limits, and the trend-test p-value | Monthly defects vs suspect-tool jobs |
+| Can we predict defects before the job? | Pre-job risk checker (Low/Medium/High, rate with 90% range, recommendation) | Learned decision-tree rule, leave-one-out recall and precision, leakage check (one line each) |
+| What should maintenance do? | Calibration gate: defects that occurred → with calibrated tools only → % reduction | Aircraft to inspect, with readings and a CSV download |
+
+The sidebar has only the file upload and the risk thresholds. Detailed statistics (factor ranking, Cramér's V, Bayesian intervals, p-chart, CMH, model coefficients, cost model) are in PRESENTATION_NOTES.md under "Supporting statistics".
 
 ## Methods summary
 
@@ -41,7 +42,7 @@ The bundled file `data/gal_belt_data.csv` is the GAL Case 3 data. Upload another
 - **Time:** p-chart with ±3σ limits; two-sided Cochran-Armitage trend test.
 - **Causation:** stratified rates and Cochran-Mantel-Haenszel; exact-overlap (confounding) detection between pre-job factors.
 - **Prediction:** pre-job features only (tool, tool status, station, month); depth-2 decision tree, L2 logistic regression and Firth logistic regression; leave-one-out cross-validation with automatic small-sample and separation warnings.
-- **Impact:** calibration gate (block tools not in *Normal* status) applied to past jobs; cost model driven by sidebar inputs.
+- **Impact:** calibration gate (block tools not in *Normal* status) applied to past jobs; affected-aircraft list with priorities.
 
 Nothing is hardcoded. The suspect factor is the pre-job level with the lowest BH q-value. `tests/test_app.py` reruns the whole app on a file where Tool-02 is the faulty tool and fails if any visible text still names Tool-05.
 
@@ -52,7 +53,7 @@ app.py            Streamlit UI (computed content only)
 src/data.py       load, validate, normalise
 src/stats.py      statistical tests and generated conclusions
 src/model.py      models, validation, risk checker
-src/impact.py     calibration gate, cost model, inspection list
+src/impact.py     calibration gate, inspection list, fleet status
 src/charts.py     Plotly figures
 tests/            pytest + Streamlit AppTest
 ```

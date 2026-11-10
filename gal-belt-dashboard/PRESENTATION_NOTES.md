@@ -45,7 +45,7 @@ Tool-05 and *Needs Calibration* occur in exactly the same 11 jobs. The data cann
 
 | Criterion | Status | Evidence |
 |---|---|---|
-| Strength | ✅ Met | Relative risk ∞ (no defects without Tool-05); BH q = 7.3 × 10⁻⁸ |
+| Strength | ✅ Met | Relative risk ∞ (no defects without Tool-05); BH q = 3.7 × 10⁻⁸ |
 | Consistency | ✅ Met | Defect rate with Tool-05 is higher in 3 of 3 stations and 3 of 3 months |
 | Temporality | 🟡 Partially | Tool status is known before the job and the defect is found after it, but there are no timestamps |
 | Plausibility | ✅ Met | A tension tool out of calibration sets tension wrongly, which causes heat and vibration; 100% of defects show that pattern |
@@ -95,7 +95,82 @@ Tool-05 and *Needs Calibration* occur in exactly the same 11 jobs. The data cann
 - **Confounding:** Tool-05 and *Needs Calibration* cannot be separated in this data.
 - **No causal proof without an intervention:** the recalibration test is the next step.
 - **One record per aircraft and no dates:** no survival or repeat-defect analysis.
-- **Cost figures are placeholders** (24 AOG h × $10k/h, 30% of defects becoming in-service failures, $1.5k per re-inspection). Replace them with GAL's figures in the sidebar.
+- **Cost figures are placeholders** (see section 6). The cost model was removed from the dashboard; replace the assumptions with GAL's figures before quoting a number.
 - **Prototype only:** not for operational aircraft use.
 
 **Data that would unlock more:** job dates and flight hours (survival analysis), measured belt tension (the mechanism), tool calibration dates (days overdue as a risk score), and technician, engine and belt-batch IDs (the remaining fishbone branches).
+
+---
+
+## 6. Supporting statistics
+
+Removed from the dashboard to keep it to four questions. Quote these if judges ask. All values are from the GAL sample (30 jobs, 11 defects, Jan to Mar) and were produced by the functions in `src/`, which are unchanged and still tested.
+
+### Factor ranking (Fisher's exact test, level vs rest, Benjamini-Hochberg correction)
+
+| Factor | Level | Defects / jobs | Rate | Rate elsewhere | Relative risk | Fisher p | BH q | Cramér's V |
+|---|---|---|---|---|---|---|---|---|
+| Tool | Tool-05 | 11 / 11 | 100% | 0% | ∞ | 1.8 × 10⁻⁸ | 3.7 × 10⁻⁸ | 1.00 |
+| Tool status | Needs Calibration | 11 / 11 | 100% | 0% | ∞ | 1.8 × 10⁻⁸ | 3.7 × 10⁻⁸ | 1.00 |
+| Tool | Tool-02 | 0 / 7 | 0% | 48% | 0 | 0.029 | 0.053 | 1.00 |
+| Tool | Tool-01 / Tool-03 | 0 / 6 each | 0% | 46% | 0 | 0.061 | 0.092 | 1.00 |
+| Station | Station C | 5 / 9 | 56% | 29% | 1.9× | 0.23 | 0.31 | 0.26 |
+| Station | Station A | 3 / 11 | 27% | 42% | 0.6× | 0.47 | 0.60 | 0.26 |
+| Station | Station B | 3 / 10 | 30% | 40% | 0.75× | 0.70 | 0.79 | 0.26 |
+| Month | Jan | 3 / 10 | 30% | 40% | 0.75× | 0.70 | 0.79 | 0.10 |
+| Month | Feb / Mar | 4 / 10 each | 40% | 35% | 1.1× | 1.00 | 1.00 | 0.10 |
+
+Belt condition, temperature and vibration give the same 1.8 × 10⁻⁸ but are symptoms recorded with the defect, not causes.
+
+### Whole-factor association (χ², with an exact test when expected counts are below 5)
+
+| Factor | Groups | χ² p | Exact p | Cramér's V | Exact method |
+|---|---|---|---|---|---|
+| Tool | 4 | 1.4 × 10⁻⁶ | 5.0 × 10⁻⁵ | 1.00 | Fisher-Freeman-Halton permutation (20,000 shuffles) |
+| Tool status | 2 | 4.3 × 10⁻⁸ | 1.8 × 10⁻⁸ | 1.00 | Fisher's exact |
+| Station | 3 | 0.37 | 0.41 | 0.26 | Fisher-Freeman-Halton permutation |
+| Month | 3 | 0.87 | 1.00 | 0.10 | Fisher-Freeman-Halton permutation |
+
+### Bayesian defect rates (Beta(1,1) prior, 90% credible interval)
+
+Fleet average 38% (90% interval 24–52%).
+
+| Group | Jobs | Defects | Estimated rate | 90% interval | P(rate above rest) |
+|---|---|---|---|---|---|
+| Tool-05 / Needs Calibration | 11 | 11 | 92% | 78–100% | 100% |
+| Tool-01 / Tool-03 | 6 | 0 | 13% | 1–35% | 2% |
+| Tool-02 | 7 | 0 | 11% | 1–31% | 1% |
+| Normal tool status | 19 | 0 | 5% | 0–14% | 0% |
+| Station A | 11 | 3 | 31% | 12–53% | 23% |
+| Station B | 10 | 3 | 33% | 14–56% | 32% |
+| Station C | 9 | 5 | 55% | 30–78% | 92% |
+| Jan | 10 | 3 | 33% | 14–56% | 32% |
+| Feb / Mar | 10 | 4 | 42% | 20–65% | 62% |
+
+Only Tool-05 / Needs Calibration has an interval entirely above the fleet average. Station C's interval overlaps it.
+
+### Time
+
+- **p-chart:** centre line 36.7%, upper control limit 82%, lower 0% (n = 10 jobs per month). Jan 30%, Feb 40%, Mar 40%: all inside the limits.
+- **Cochran-Armitage trend test:** z = 0.46, p = 0.64. The rise from 3 to 4 defects per month is within chance; it follows Tool-05 use (3, 4, 4 jobs).
+
+### Causation
+
+- **Stratification:** within each tool, and within each tool status, every station has exactly the same defect rate (spread 0 percentage points, within-group p = 1.0). Crude station p = 0.41 (exact).
+- **Cochran-Mantel-Haenszel** (Tool-05 vs other jobs, stratified by station): χ² = 26.7, p = 2.4 × 10⁻⁷. The tool effect holds after accounting for station.
+- **Confounding:** Tool-05 and Needs Calibration occur in exactly the same 11 jobs.
+
+### Prediction models
+
+- **Decision tree rule:** IF tool status is Needs Calibration THEN defect (11 of 11); otherwise no defect (0 of 19).
+- **L2 logistic regression (balanced):** Tool-05 and Needs Calibration each ×3.9 odds (coefficient 1.36, weight split evenly because the columns are identical); Normal status ×0.26; Station C ×1.2.
+- **Firth logistic (converged):** Tool-05 ×77 odds; every other term between ×0.83 and ×1.21.
+- **Validation:** leave-one-out and stratified 5-fold both give ROC-AUC 1.00, recall 100% (11 of 11), precision 100% (0 false alarms), for both the logistic model and the tree. With only 11 defects and perfect separation, this shows a clean sample, not a perfect model.
+- **Leakage demo:** a model on belt condition, temperature and vibration also scores AUC 1.00 and recall 100%, because those readings are taken at the same inspection that finds the defect.
+
+### Cost model (placeholder assumptions)
+
+Assumptions: $10,000 per AOG hour, 24 AOG hours per in-service belt failure, 30% of defects would become in-service failures, $1,500 per aircraft re-inspection.
+
+With the calibration gate avoiding 11 defects and 11 aircraft re-inspected: 3.3 in-service failures avoided, 79 AOG hours avoided, $792,000 AOG cost avoided, $16,500 re-inspection cost, **net benefit about $775,500 over three months**. Replace the assumptions with GAL's figures before quoting this.
+

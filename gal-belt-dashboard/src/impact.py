@@ -1,20 +1,10 @@
-"""Business impact: calibration gate, cost estimate, affected-aircraft action list."""
+"""Business impact: calibration gate, affected-aircraft action list, per-aircraft fleet status."""
 from __future__ import annotations
-
-from dataclasses import dataclass
 
 import pandas as pd
 
 from .data import NORMAL_STATUS, SYMPTOMS
 from .stats import suspect_mask
-
-
-@dataclass
-class CostAssumptions:
-    cost_per_aog_hour: float = 10_000.0      # USD, placeholder
-    aog_hours_per_failure: float = 24.0      # hours on ground per in-service belt failure
-    share_to_in_service: float = 0.30        # share of missed defects that would fail in service
-    cost_per_reinspection: float = 1_500.0   # USD per aircraft re-inspection
 
 
 def calibration_gate(df: pd.DataFrame) -> dict:
@@ -26,14 +16,6 @@ def calibration_gate(df: pd.DataFrame) -> dict:
     return {"defects_total": total, "defects_remaining": remaining, "defects_avoided": avoided,
             "reduction_pct": (avoided / total * 100) if total else 0.0,
             "jobs_blocked": int(blocked.sum()), "jobs_total": len(df)}
-
-
-def cost_estimate(defects_avoided: int, aircraft_to_reinspect: int, a: CostAssumptions) -> dict:
-    failures = defects_avoided * a.share_to_in_service
-    aog_cost = failures * a.aog_hours_per_failure * a.cost_per_aog_hour
-    reinspect = aircraft_to_reinspect * a.cost_per_reinspection
-    return {"in_service_failures_avoided": failures, "aog_hours_avoided": failures * a.aog_hours_per_failure,
-            "aog_cost_avoided": aog_cost, "reinspection_cost": reinspect, "net_benefit": aog_cost - reinspect}
 
 
 def affected_aircraft(df: pd.DataFrame, top: dict | None) -> pd.DataFrame:

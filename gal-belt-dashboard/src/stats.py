@@ -164,12 +164,6 @@ def bayes_rates(df: pd.DataFrame, factor: str, prior=(1.0, 1.0), n_draws: int = 
     return pd.DataFrame(rows)
 
 
-def bayes_overall(df: pd.DataFrame, prior=(1.0, 1.0)) -> dict:
-    a = prior[0] + df["defect"].sum()
-    b = prior[1] + len(df) - df["defect"].sum()
-    return {"post_mean": a / (a + b), "ci_low": sps.beta.ppf(0.05, a, b), "ci_high": sps.beta.ppf(0.95, a, b)}
-
-
 def pareto(df: pd.DataFrame, factor: str = "Tool_ID") -> pd.DataFrame:
     r = rates_by_factor(df, factor)[["level", "jobs", "defects"]].sort_values(
         ["defects", "level"], ascending=[False, True]).reset_index(drop=True)
