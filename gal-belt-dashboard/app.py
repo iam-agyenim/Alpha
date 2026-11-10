@@ -16,15 +16,17 @@ st.set_page_config(page_title="B787 Belt Defect Investigation", page_icon="âœˆï¸
 st.markdown("""
 <style>
   html, body, [class*="css"] { font-size: 16px; }
-  .alert { background:#fdecec; border-left:6px solid #d03b3b; padding:14px 18px; border-radius:6px;
-           color:#7a1414; font-size:1.08rem; margin:6px 0 12px 0; }
-  .alert b { color:#7a1414; }
-  .card { border:1px solid #e1e0d9; border-radius:8px; padding:14px 18px; background:#fff; }
-  .band-High { background:#fdecec; border-left:8px solid #d03b3b; }
-  .band-Medium { background:#fff7e0; border-left:8px solid #E0A100; }
-  .band-Low { background:#e9f7e9; border-left:8px solid #0ca30c; }
+  /* Translucent tints + inherited text colour, so every box reads in both light and dark theme. */
+  .alert { background:rgba(208,59,59,0.14); border-left:6px solid #d03b3b; padding:14px 18px; border-radius:6px;
+           color:inherit; font-size:1.08rem; margin:6px 0 12px 0; }
+  .card { border:1px solid rgba(128,128,128,0.35); border-radius:8px; padding:14px 18px;
+          background:rgba(128,128,128,0.06); color:inherit; }
+  .band-High { background:rgba(208,59,59,0.14); border-left:8px solid #d03b3b; }
+  .band-Medium { background:rgba(224,161,0,0.16); border-left:8px solid #E0A100; }
+  .band-Low { background:rgba(12,163,12,0.14); border-left:8px solid #0ca30c; }
   .band-title { font-size:1.7rem; font-weight:700; margin:0; }
-  .proves { color:#52606d; font-size:0.95rem; border-left:3px solid #9aa3ad; padding-left:10px; margin:4px 0 14px 0; }
+  .muted { opacity:0.75; }
+  .proves { color:inherit; opacity:0.8; font-size:0.95rem; border-left:3px solid #9aa3ad; padding-left:10px; margin:4px 0 14px 0; }
   .present h1 { font-size:2.4rem; }
 </style>
 """, unsafe_allow_html=True)
@@ -150,14 +152,15 @@ tabs = st.tabs(TAB_NAMES)
 
 def style_records(d: pd.DataFrame):
     def row_style(r):
-        base = "background-color:#fdecec" if r.get("Belt_Defect") == "Yes" else ""
+        # Translucent tints (no fixed text colour) stay readable in light and dark theme.
+        base = "background-color:rgba(208,59,59,0.18)" if r.get("Belt_Defect") == "Yes" else ""
         return [base] * len(r)
 
     def cell(v):
         if v == "Needs Calibration":
-            return "background-color:#fff1c2; color:#7a4b00; font-weight:600"
+            return "background-color:rgba(224,161,0,0.35); font-weight:600"
         if v in ("Abnormal", "High"):
-            return "color:#b42318; font-weight:600"
+            return "color:#d64545; font-weight:600"
         return ""
 
     return d.style.apply(row_style, axis=1).map(cell)
@@ -475,7 +478,7 @@ with tabs[5]:
     for i, r in enumerate(fb.itertuples()):
         with fcols[i % 3]:
             st.markdown(f'<div class="card" style="margin-bottom:12px"><b>{r.category}</b><br>'
-                        f'{FISH_ICON.get(r.status, "")} <b>{r.status}</b><br><span style="color:#52606d">'
+                        f'{FISH_ICON.get(r.status, "")} <b>{r.status}</b><br><span class="muted">'
                         f'{r.evidence}</span></div>', unsafe_allow_html=True)
     st.subheader("5 Whys")
     for i, w in enumerate(A["whys"], 1):
