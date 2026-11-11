@@ -1,9 +1,0 @@
-# Theme taken from the GAL x MoIAT briefing deck (Case 3 "Expected Dashboard" slide),
-# so the app, its charts and the slides share one look.
-[theme]
-base = "light"
-primaryColor = "#265AA4"            # deck accent1 (navy blue)
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F2F4F7" # deck lt2
-textColor = "#404042"               # deck dk1
-font = "Cairo:https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap"

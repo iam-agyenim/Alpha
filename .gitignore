@@ -1,0 +1,5 @@
+.venv/
+__pycache__/
+catboost_info/
+.DS_Store
+.claude/

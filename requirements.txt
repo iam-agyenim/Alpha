@@ -1,0 +1,10 @@
+# Versions used to produce outputs/ (Python 3.12). On macOS, lightgbm/xgboost also need: brew install libomp
+pandas==3.1.1
+numpy==2.5.4
+scikit-learn==1.9.1
+lightgbm==4.7.0
+catboost==1.2.10
+openpyxl==3.1.5
+xgboost==3.4.1   # only for scripts/compare_model_families.py
+streamlit==1.67.0  # dashboard
+plotly==7.1.0      # dashboard charts
