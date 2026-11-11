@@ -66,6 +66,8 @@ If you only remember one sentence: *"Overdue tool → wrong belt tension → mor
 
 This is the page for a maintenance manager: what is wrong, and what to do today.
 
+![Fleet alert tab: red alert box and aircraft table](docs/screenshots/1-fleet-alert.webp)
+
 ### The red alert box
 - **"19 B787 aircraft have abnormal belt measurements."** Of the 100 aircraft, 19 are High Risk or Medium (9 High Risk + 10 Medium). The other 81 are Normal.
 - **"9 are high risk and need inspection first."**
@@ -101,6 +103,8 @@ One row per aircraft, worst first. By default it shows only the flagged aircraft
 ## 5. Tab 2: Trends
 
 This tab answers: is the problem getting better or worse, and when does it happen?
+
+![Trends tab: monthly defect rate, ambient temperature and overdue-tool screenings](docs/screenshots/2-trends.webp)
 
 ### Chart 1: Monthly defect rate (line chart)
 - **What it shows:** the % of screenings each month that found (or are predicted to find) a defect.
@@ -176,6 +180,8 @@ For each measurement, two bars: defect rate when the reading was **outside** the
 
 This tab answers: which tool is the problem right now, and how do we know calibration matters?
 
+![Tools & calibration tab: tool status table, defect rate by calibration load, and Tool-03 over time](docs/screenshots/3-tools-calibration.webp)
+
 ### Tool status table
 One row per tool, worst first.
 
@@ -224,6 +230,8 @@ The same thing happened three times: **Tool-05 in late 2024, Tool-01 in spring 2
 
 This tab is the working list for engineers.
 
+![Inspection list tab: filters and screenings to inspect](docs/screenshots/4-inspection-list.webp)
+
 ### Screenings to inspect
 - **344** test-period screenings are High Risk or Medium, sorted by highest defect risk first.
 - **Filters:** Status (High Risk / Medium), Tool, Station. For example, pick Tool-03 to see every job it touched.
@@ -233,6 +241,9 @@ This tab is the working list for engineers.
 Note the difference from Tab 1: Tab 1 shows **one row per aircraft** (its current state). This tab shows **every risky screening** in the period, so one aircraft can appear more than once (B787-048 appears twice).
 
 ### Aircraft drill-down
+
+![Aircraft drill-down for B787-022: each dot is one screening, height is predicted defect risk](docs/screenshots/5-aircraft-drill-down.webp)
+
 - Choose an aircraft to see **every screening it had in the test period** as dots on a timeline.
 - **Height** = predicted defect risk. **Colour** = status.
 - The **dashed line ("Yes threshold")** at about 51% is where the model switches to predicting a defect. Dots above it are High Risk.
