@@ -16,6 +16,7 @@ import streamlit as st
 
 from belt_defect import config
 from belt_defect import fleet_analysis as fa
+import agents_tab  # noqa: E402  (dashboard/agents_tab.py)
 
 st.set_page_config(page_title="B787 Belt Health", page_icon="✈️", layout="wide")
 
@@ -148,8 +149,8 @@ aircraft = fa.aircraft_status(data, window_days)
 tools = fa.tool_summary(data)
 alert = fa.fleet_alert(aircraft, tools)
 
-tab_alert, tab_trends, tab_factors, tab_tools, tab_inspect, tab_model = st.tabs(
-    ["Fleet alert", "Trends", "Factors", "Tools & calibration", "Inspection list", "Model"])
+tab_alert, tab_trends, tab_factors, tab_tools, tab_inspect, tab_model, tab_agents = st.tabs(
+    ["Fleet alert", "Trends", "Factors", "Tools & calibration", "Inspection list", "Model", "AI agents"])
 
 # ============================================================================ 1. Fleet alert (main page)
 with tab_alert:
@@ -388,3 +389,7 @@ with tab_model:
     if submission.exists():
         st.download_button("Download case_3_predictions.csv", submission.read_bytes(), "case_3_predictions.csv",
                            "text/csv")
+
+# ============================================================================ 7. AI agents
+with tab_agents:
+    agents_tab.render(data, section)

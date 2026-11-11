@@ -78,3 +78,23 @@ normal range (99% of defect-free training screenings); **Normal** otherwise.
 Test prediction: 106 of 2,000 rows flagged (5.3%, vs 2.7% in training). The test period (late May to Aug 2025)
 covers the hot-season peak and a build-up of overdue tool calibrations, both strong defect drivers;
 see `scripts/check_test_distribution_shift.py`.
+
+## AI agent team (multi-agent layer)
+
+`belt_defect/agents/` adds a team of OpenAI agents on top of the trained model (dashboard tab **AI agents**):
+four specialists (risk, measurements, tools & calibration, trends) run in parallel with read-only tools that
+return the model's predictions and training-data statistics; a lead planner merges their findings into one
+prioritised action plan. A router answers chat questions with the right specialist.
+
+| File | Role |
+|---|---|
+| `agents/tools.py` | 10 read-only tools (model output + statistics), sanitised JSON |
+| `agents/agent.py` | capped tool-calling loop (OpenAI Responses API), number grounding check |
+| `agents/team.py` | specialists, peer cross-checks, lead planner, chat router, audit log |
+| `agents/guard.py` | prompt-injection screening, output allowlist, grounding |
+| `agents/cost.py`, `agents/settings.py` | token/cost meter, prices, models, spend limits |
+| `dashboard/agents_tab.py` | Streamlit UI |
+
+**API key:** put `OPENAI_API_KEY=...` in `.env` (git-ignored) locally, or in Streamlit Cloud **Settings → Secrets**.
+Measured cost: about $0.03 per full briefing, about $0.0007 per chat question. Tests: `.venv/bin/python -m pytest tests`.
+See `PRESENTATION_GUIDE.md` sections 12–15 for architecture, security and the business case.
