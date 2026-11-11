@@ -7,3 +7,4 @@ catboost_info/
 .env.*
 .streamlit/secrets.toml
 outputs/agent_logs/
+outputs/workflow_runs/last_run.json

@@ -1,6 +1,6 @@
-"""Multi-agent layer on top of the trained belt-defect model.
+"""Agentic workflow on top of the trained belt-defect model.
 
-Specialist agents (OpenAI models) call read-only tools that return the trained model's predictions and
-training-data statistics; a lead agent merges their findings into one action plan.
+Data flows Intake → Security agent → ML model → Orchestrator → Quality & Safety → Logistics → Commercial →
+Security output check → Human approval → Outputs, with a timestamped event log for every step.
 """
-from .team import SPECIALISTS, LEAD, answer_question, make_client, run_briefing  # noqa: F401
+from .workflow import NODES, EDGES, BATCHES, WorkflowRun, approve_run, make_client, run_workflow  # noqa: F401

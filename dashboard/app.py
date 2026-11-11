@@ -1,9 +1,10 @@
-"""B787 fleet belt health dashboard (GAL Case 3).
+"""B787 fleet belt health (GAL Case 3): a minimal findings dashboard and an agentic maintenance workflow.
 
 Run from the project root:
     .venv/bin/streamlit run dashboard/app.py
 Needs model outputs first: .venv/bin/python scripts/train_and_predict.py
 """
+import json
 import sys
 from html import escape
 from pathlib import Path
@@ -14,119 +15,98 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+import report_share as share  # noqa: E402  (dashboard/report_share.py)
+import workflow_view  # noqa: E402  (dashboard/workflow_view.py)
 from belt_defect import config
 from belt_defect import fleet_analysis as fa
-import ai_panel  # noqa: E402  (dashboard/ai_panel.py)
+from belt_defect.agents import settings
+from belt_defect.agents import workflow as wf
 
 st.set_page_config(page_title="B787 Belt Health", page_icon="✈️", layout="wide")
 
-# --- Colors: GAL slide look for page chrome, validated chart palette for data ---
-NAVY, BLUE, GOLD, PAGE_BG = "#1B2A5A", "#22509C", "#A8873A", "#F3F4F7"
-INK, INK_2, MUTED, GRID, AXIS, SURFACE = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7", "#fcfcfb"
-SERIES_ACTUAL, SERIES_PREDICTED = "#2a78d6", "#eb6834"          # categorical slots 1 and 2
-STATUS_COLOR = {fa.STATUS_HIGH: "#d03b3b", fa.STATUS_MEDIUM: "#ec835a", fa.STATUS_NORMAL: "#0ca30c"}
-TEST_PERIOD_FILL = "rgba(235,104,52,0.07)"                      # faint band behind predicted months
-PLOT_CONFIG = {"displayModeBar": False}
+# --- Three-colour theme: white, green, black (greys are tints of black) ---
+GREEN, GREEN_TINT, GREEN_MID, BLACK = "#0B6B3A", "#E8F3EC", "#9CCBB0", "#0B0B0B"
+INK_2, MUTED, LINE = "#4A4F4C", "#8A918D", "#E3E7E4"
+PLOT = {"displayModeBar": False}
+RUNS_DIR = config.OUTPUT_DIR / "workflow_runs"
+SAMPLE_RUN = RUNS_DIR / "sample_run.json"
 
 
-# ============================================================================ helpers
 def html(markup: str):
     st.markdown(markup, unsafe_allow_html=True)
 
 
-def pct(value, digits=1, signed=False) -> str:
-    """Format a fraction or percent number for display."""
-    if pd.isna(value):
-        return "—"
-    return f"{value:+.{digits}f}%" if signed else f"{value:.{digits}f}%"
-
-
-def style_figure(fig: go.Figure, height=300, y_suffix="", legend=True) -> go.Figure:
-    """Recessive grid/axes, thin marks, hover on, one y-axis."""
-    fig.update_layout(
-        height=height, margin=dict(l=4, r=8, t=8, b=4), paper_bgcolor=SURFACE, plot_bgcolor=SURFACE,
-        font=dict(family="Inter, system-ui, sans-serif", color=INK_2, size=12), showlegend=legend,
-        legend=dict(orientation="h", y=1.08, x=0, font=dict(color=INK_2)), hovermode="x unified",
-        barcornerradius=4, bargap=0.35,
-        hoverlabel=dict(bgcolor="#ffffff", bordercolor=AXIS, font_color=INK),
-    )
-    fig.update_xaxes(showgrid=False, linecolor=AXIS, tickfont=dict(color=MUTED), title=None)
-    fig.update_yaxes(gridcolor=GRID, zeroline=False, tickfont=dict(color=MUTED), title=None, ticksuffix=y_suffix)
-    return fig
-
-
-def shade_test_period(fig: go.Figure, data: fa.FleetData):
-    """Light band + label over the months that are model predictions."""
-    start = data.test.month.min() - pd.Timedelta(days=15)
-    end = data.test.month.max() + pd.Timedelta(days=15)
-    fig.add_vrect(x0=start, x1=end, fillcolor=TEST_PERIOD_FILL, line_width=0, layer="below",
-                  annotation_text="Test period (predicted)", annotation_position="top left",
-                  annotation_font=dict(color=MUTED, size=11))
-
-
-def status_badge(status: str) -> str:
-    """Colored dot + text label (status never shown by color alone)."""
-    return (f'<span class="status"><span class="dot" style="background:{STATUS_COLOR[status]}"></span>'
-            f'{escape(status)}</span>')
-
-
-def section(title: str, subtitle: str = ""):
-    html(f'<div class="section-title">{escape(title)}</div>'
-         + (f'<div class="section-sub">{escape(subtitle)}</div>' if subtitle else ""))
-
-
-def kpi(col, label: str, value: str, note: str = ""):
-    col.markdown(f'<div class="kpi"><div class="kpi-label">{escape(label)}</div>'
-                 f'<div class="kpi-value">{escape(value)}</div><div class="kpi-note">{escape(note)}</div></div>',
-                 unsafe_allow_html=True)
-
-
-# ============================================================================ styles
 html(f"""<style>
-.stApp {{background:{PAGE_BG};}}
-.block-container {{padding-top:2.2rem; max-width:1600px;}}
+.stApp {{background:#FFFFFF;}}
+.block-container {{padding-top:2rem; max-width:1500px;}}
 [data-testid="stAppDeployButton"], footer {{display:none;}}
-.kicker {{display:flex; align-items:center; gap:14px; color:{BLUE}; letter-spacing:.22em; font-size:14px;
-          font-weight:600; text-transform:uppercase;}}
-.kicker::before {{content:""; width:46px; height:3px; background:{GOLD};}}
-.page-title {{font-size:42px; font-weight:400; color:{INK}; margin:4px 0 18px; line-height:1.15;}}
-.page-title b {{color:{BLUE}; font-weight:800;}}
-.alert {{background:#fff; border:2px solid #d03b3b; border-radius:14px; padding:20px 26px; margin-bottom:22px;}}
-.alert-head {{display:flex; gap:28px; flex-wrap:wrap; align-items:center; margin-bottom:6px;}}
-.alert-tag {{color:#d03b3b; font-weight:800; letter-spacing:.18em; font-size:15px;}}
-.alert-tag::before {{content:"●"; margin-right:10px;}}
-.alert-meta {{color:{GOLD}; font-weight:700; letter-spacing:.16em; font-size:13px; text-transform:uppercase;}}
-.alert-headline {{font-size:26px; font-weight:800; color:{INK}; margin:4px 0;}}
-.alert-text {{font-size:17px; color:{INK_2}; line-height:1.5;}}
-.alert-note {{font-size:13px; color:{MUTED}; margin-top:8px;}}
-table.fleet {{width:100%; border-collapse:collapse; background:#fff; font-size:16px;}}
-table.fleet th {{background:{BLUE}; color:#fff; text-align:left; padding:12px 14px; font-weight:700;}}
-table.fleet td {{padding:11px 14px; border-bottom:1px solid #e6e8ee; color:{INK}; vertical-align:top;
-                 white-space:nowrap;}}
-table.fleet tr:nth-child(even) td {{background:#EEF2F9;}}
-table.fleet td.aircraft {{font-weight:800;}}
-table.fleet td.why {{font-size:13px; color:{INK_2}; min-width:260px; white-space:normal;}}
-.status {{font-weight:700; white-space:nowrap;}}
-.dot {{display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:8px;}}
-.kpi {{background:#fff; border-radius:12px; padding:14px 18px; border:1px solid rgba(11,11,11,.08); height:100%;}}
-.kpi-label {{font-size:12px; color:{MUTED}; text-transform:uppercase; letter-spacing:.08em; font-weight:600;}}
-.kpi-value {{font-size:28px; font-weight:800; color:{NAVY};}}
-.kpi-note {{font-size:12.5px; color:{INK_2};}}
-.section-title {{font-size:19px; font-weight:800; color:{NAVY}; margin-top:10px;}}
-.section-sub {{font-size:13.5px; color:{INK_2}; margin-bottom:6px;}}
-.table-wrap {{overflow-x:auto; max-width:100%;}}
+[data-testid="stSidebar"] {{background:#FFFFFF; border-right:1px solid {LINE};}}
+h1,h2,h3 {{color:{BLACK};}}
+.stButton > button, .stDownloadButton > button, .stLinkButton > a {{border-radius:8px; font-weight:600;}}
+.stButton > button[kind="primary"], .stDownloadButton > button {{background:{BLACK}; color:#fff; border:1px solid {BLACK};}}
+.stButton > button[kind="primary"]:hover, .stDownloadButton > button:hover {{background:#2A2D2B; color:#fff; border-color:#2A2D2B;}}
+.stButton > button[kind="secondary"], .stLinkButton > a {{background:#fff; color:{BLACK}; border:1px solid {BLACK};}}
+.kicker {{display:flex; align-items:center; gap:12px; color:{GREEN}; letter-spacing:.2em; font-size:12.5px; font-weight:700;
+          text-transform:uppercase;}}
+.kicker::before {{content:""; width:36px; height:3px; background:{GREEN};}}
+.title {{font-size:34px; font-weight:400; color:{BLACK}; margin:2px 0 14px;}} .title b {{font-weight:800;}}
+.kpi {{border:1px solid {LINE}; border-radius:14px; padding:14px 18px; background:#fff; height:100%;}}
+.kpi .l {{font-size:11.5px; color:{MUTED}; text-transform:uppercase; letter-spacing:.08em; font-weight:600;}}
+.kpi .v {{font-size:30px; font-weight:800; color:{BLACK}; line-height:1.15;}} .kpi .v span {{font-size:15px; color:{MUTED}; font-weight:500;}}
+.kpi .n {{font-size:12.5px; color:{INK_2};}}
+.kpi.accent {{border-color:{GREEN}; background:{GREEN_TINT};}} .kpi.accent .v {{color:{GREEN};}}
+.alert {{border:1.5px solid {BLACK}; border-radius:14px; padding:16px 20px; margin:14px 0 6px; background:#fff;}}
+.alert .h {{font-size:20px; font-weight:800; color:{BLACK};}} .alert .t {{font-size:15px; color:{INK_2}; margin-top:4px; line-height:1.5;}}
+.alert .tag {{display:inline-block; background:{BLACK}; color:#fff; font-size:11px; font-weight:700; letter-spacing:.12em;
+             border-radius:6px; padding:3px 8px; margin-bottom:8px;}}
+.alert .act {{margin-top:10px; font-size:14px; color:{GREEN}; font-weight:700;}}
+.sec {{font-size:16px; font-weight:800; color:{BLACK}; margin:16px 0 2px;}} .secsub {{font-size:12.5px; color:{MUTED}; margin-bottom:6px;}}
+table.t {{width:100%; border-collapse:collapse; font-size:14px;}}
+table.t th {{text-align:left; font-size:11.5px; color:{MUTED}; text-transform:uppercase; letter-spacing:.06em; font-weight:600;
+            padding:8px 10px; border-bottom:1px solid {LINE};}}
+table.t td {{padding:9px 10px; border-bottom:1px solid #F0F2F1; color:{BLACK}; vertical-align:top; white-space:nowrap;}}
+table.t td.why {{font-size:12.5px; color:{INK_2}; white-space:normal; min-width:220px;}} table.t td.ac {{font-weight:700; white-space:nowrap;}}
+.wrap {{overflow-x:auto;}}
+.badge {{display:inline-block; font-size:11.5px; font-weight:700; border-radius:999px; padding:2px 10px; white-space:nowrap;}}
+.badge.high {{background:{BLACK}; color:#fff;}} .badge.medium {{border:1.5px solid {GREEN}; color:{GREEN};}}
+.badge.normal {{background:{GREEN_TINT}; color:{GREEN};}}
+.note {{font-size:12.5px; color:{MUTED};}}
 .st-key-page [role="radiogroup"] {{gap:2px;}}
-.st-key-page [role="radiogroup"] > div {{width:100%;}}
 .st-key-page [data-testid="stRadioOption"] {{padding:9px 12px; border-radius:8px; width:100%; cursor:pointer;}}
 .st-key-page [data-testid="stRadioOption"] > div > div:first-child:not([data-testid]) {{display:none;}}
 .st-key-page [data-testid="stRadioOption"] p {{font-size:15px;}}
-.st-key-page [data-testid="stRadioOption"]:hover {{background:#EEF2F9;}}
-.st-key-page [data-testid="stRadioOption"][data-selected="true"] {{background:#E3EAF7; box-shadow:inset 3px 0 0 {BLUE};}}
-.st-key-page [data-testid="stRadioOption"][data-selected="true"] p {{font-weight:700; color:{NAVY};}}
-[data-testid="stColumn"]:has(.ai-head) {{position:sticky; top:0.75rem; align-self:flex-start;}}
-.insight {{background:#fff; border-left:4px solid {GOLD}; border-radius:8px; padding:12px 16px; margin:6px 0 14px;
-           color:{INK}; font-size:14.5px;}}
+.st-key-page [data-testid="stRadioOption"]:hover {{background:#F3F5F4;}}
+.st-key-page [data-testid="stRadioOption"][data-selected="true"] {{background:{GREEN_TINT}; box-shadow:inset 3px 0 0 {GREEN};}}
+.st-key-page [data-testid="stRadioOption"][data-selected="true"] p {{font-weight:700; color:{GREEN};}}
+.appr {{border:1.5px dashed {GREEN}; border-radius:14px; padding:16px 20px; background:{GREEN_TINT};}}
+.appr .h {{font-size:17px; font-weight:800; color:{BLACK};}} .appr .t {{font-size:14px; color:{INK_2}; margin-top:4px;}}
+.facts {{display:flex; gap:10px; flex-wrap:wrap; margin:10px 0 4px;}}
+.fact {{background:#fff; border:1px solid {LINE}; border-radius:10px; padding:6px 12px; font-size:13px;}} .fact b {{font-size:16px;}}
 </style>""")
+
+
+def badge(status: str) -> str:
+    cls = {fa.STATUS_HIGH: "high", fa.STATUS_MEDIUM: "medium"}.get(status, "normal")
+    return f'<span class="badge {cls}">{escape(status)}</span>'
+
+
+def kpi(col, label, value, note="", accent=False):
+    col.markdown(f'<div class="kpi{" accent" if accent else ""}"><div class="l">{escape(label)}</div>'
+                 f'<div class="v">{value}</div><div class="n">{escape(note)}</div></div>', unsafe_allow_html=True)
+
+
+def section(title, sub=""):
+    html(f'<div class="sec">{escape(title)}</div>' + (f'<div class="secsub">{escape(sub)}</div>' if sub else ""))
+
+
+def style_fig(fig, height=270, suffix="%"):
+    fig.update_layout(height=height, margin=dict(l=4, r=8, t=8, b=4), paper_bgcolor="#fff", plot_bgcolor="#fff",
+                      font=dict(family="Inter, system-ui, sans-serif", color=INK_2, size=12), showlegend=False,
+                      hoverlabel=dict(bgcolor="#fff", bordercolor=LINE, font_color=BLACK), bargap=0.35,
+                      barcornerradius=4)
+    fig.update_xaxes(showgrid=False, linecolor=LINE, tickfont=dict(color=MUTED), title=None)
+    fig.update_yaxes(gridcolor="#EEF1EF", zeroline=False, tickfont=dict(color=MUTED), title=None, ticksuffix=suffix)
+    return fig
 
 
 # ============================================================================ data
@@ -141,288 +121,239 @@ except FileNotFoundError as err:
     st.error(str(err))
     st.stop()
 
-last_date = data.test[config.DATE_COLUMN].max()
-
-PAGES = {"Fleet alert": "🚨", "Trends": "📈", "Factors": "🔍", "Tools & calibration": "🔧",
-         "Inspection list": "📋", "Model": "🧠"}
-
 with st.sidebar:
-    st.markdown("### Pages")
-    page = st.radio("Pages", list(PAGES), format_func=lambda p: f"{PAGES[p]}  {p}", label_visibility="collapsed",
-                    key="page")
+    html(f'<div style="font-weight:800;font-size:17px;color:{BLACK};margin:4px 0 12px">✈️ B787 Belt Health</div>')
+    page = st.radio("Pages", ["Dashboard", "Workflow"], key="page", label_visibility="collapsed",
+                    format_func=lambda p: {"Dashboard": "📊  Dashboard", "Workflow": "🔀  Workflow"}[p])
     st.divider()
-    st.markdown("### Settings")
-    basis = st.radio("Aircraft status based on",
-                     ["Latest screening", "Riskiest screening, last 30 days"],
-                     help="Latest = current belt state. Last 30 days = worst screening per aircraft in that window.")
-    window_days = None if basis == "Latest screening" else 30
-    st.caption(f"Training: {len(data.train):,} screenings, {data.train.month.min():%b %Y}–{data.train.month.max():%b %Y} "
-               f"(actual outcomes).  \nTest: {len(data.test):,} screenings, {data.test.month.min():%b %Y}–"
-               f"{last_date:%b %Y} (model predictions).")
-    st.caption("Associations shown here are not proof of cause. Confirm by physical inspection and a tool "
-               "check against a calibrated reference.")
-
-aircraft = fa.aircraft_status(data, window_days)
-tools = fa.tool_summary(data)
-alert = fa.fleet_alert(aircraft, tools)
+    st.caption(f"Training: {len(data.train):,} screenings with known outcomes, {data.train.month.min():%b %Y}–"
+               f"{data.train.month.max():%b %Y}.  \nLatest period: {len(data.test):,} screenings scored by the model, "
+               f"{data.test.month.min():%b %Y}–{data.test.month.max():%b %Y}.")
+    st.caption("Associations are not proof of cause. A qualified engineer makes every maintenance decision.")
 
 
-# ============================================================================ 1. Fleet alert (main page)
-def page_fleet_alert():
-    html('<div class="kicker">Case 3 · Fleet belt health</div>'
-         '<div class="page-title">B787 Fleet <b>Dashboard</b></div>')
-
-    html(f"""<div class="alert">
-      <div class="alert-head"><span class="alert-tag">FLEET ALERT</span>
-        <span class="alert-meta">Data through {last_date:%d %b %Y}</span></div>
-      <div class="alert-headline">{escape(alert["headline"])}</div>
-      <div class="alert-text">{escape(alert["detail"])} {escape(alert["factor"])}</div>
-      <div class="alert-note">Association, not proven cause. Recommended: pull {escape(alert["tool_id"])} for
-        calibration and inspect High Risk aircraft first.</div>
-    </div>""")
-
-    show_all = st.toggle("Show all 100 aircraft", value=False)
-    rows = aircraft if show_all else aircraft[aircraft["Belt Status"] != fa.STATUS_NORMAL]
-    body = "".join(
-        f'<tr><td class="aircraft">{escape(r.Aircraft)}</td><td>{status_badge(r["Belt Status"])}</td>'
-        f'<td>{pct(r["Tension Difference"], signed=True)}</td><td>{escape(r.Tool)}</td>'
-        f'<td>{escape(r.Engine)}</td><td>{r["Screening date"]:%d %b %Y}</td><td>{pct(r["Defect risk"] * 100, 0)}</td>'
-        f'<td class="why">{escape(r.Why)}</td></tr>'
-        for _, r in rows.iterrows())
-    html('<div class="table-wrap"><table class="fleet"><thead><tr><th>Aircraft</th><th>Belt Status</th>'
-         '<th>Tension Difference</th><th>Tool</th><th>Engine</th><th>Screening</th><th>Defect risk</th>'
-         f'<th>Why flagged</th></tr></thead><tbody>{body}</tbody></table></div>')
-    st.caption("High Risk = model predicts a confirmed defect. Medium = defect risk ≥ 20% or a measurement outside "
-               "the normal range (99% of defect-free screenings). Tension Difference = measured vs target tension.")
-
-    st.write("")
-    c1, c2, c3, c4 = st.columns(4)
-    status_counts = aircraft["Belt Status"].value_counts()
-    kpi(c1, "High Risk aircraft", str(status_counts.get(fa.STATUS_HIGH, 0)), "inspect first")
-    kpi(c2, "Medium aircraft", str(status_counts.get(fa.STATUS_MEDIUM, 0)), "inspect at next check")
-    kpi(c3, "Predicted defect rate", pct(data.test.predicted_defect.mean() * 100),
-        f"test period vs {pct(data.train[config.LABEL_COLUMN].mean() * 100)} in training")
-    overdue_tools = tools.loc[tools.current_overdue_share > 0.2, "Tool_ID"].tolist()
-    kpi(c4, "Tools overdue for calibration", str(len(overdue_tools)), ", ".join(overdue_tools) or "none")
-
-# ============================================================================ 2. Trends
-def page_trends():
-    trend = fa.monthly_defect_trend(data)
-    section("Monthly defect rate", "Training months show actual confirmed defects; test months show model predictions.")
-    fig = go.Figure()
-    for source, color, dash in [("Actual", SERIES_ACTUAL, "solid"), ("Predicted", SERIES_PREDICTED, "dash")]:
-        part = trend[trend.source == source]
-        fig.add_scatter(x=part.month, y=part.defect_rate * 100, name=source, mode="lines+markers",
-                        line=dict(color=color, width=2, dash=dash), marker=dict(size=8, line=dict(color=SURFACE, width=2)),
-                        customdata=part.screenings, hovertemplate="%{y:.1f}% of %{customdata} screenings")
-    shade_test_period(fig, data)
-    st.plotly_chart(style_figure(fig, 340, "%"), width="stretch", config=PLOT_CONFIG)
-
-    yearly = data.train.assign(year=data.train.month.dt.year, m=data.train.month.dt.month)
-    # Same spring months a year apart (Apr–May exist in both training years)
-    spring = yearly[yearly.m.isin([4, 5])].groupby("year")[config.LABEL_COLUMN].mean() * 100
-    html(f'<div class="insight"><b>Two waves a year, and rising.</b> Defects peak in late spring (hottest months) and '
-         f'again in autumn when tools run overdue for calibration, then drop after recalibration in December. '
-         f'Same months a year apart: Apr–May defect rate rose from {spring.get(2024, float("nan")):.1f}% (2024) to '
-         f'{spring.get(2025, float("nan")):.1f}% (2025).</div>')
-
-    left, right = st.columns(2)
-    drivers = trend.groupby("month", as_index=False).agg(ambient_temp=("ambient_temp", "mean"),
-                                                         overdue_share=("overdue_share", "mean"))
-    with left:
-        section("Average ambient temperature")
-        fig = go.Figure(go.Scatter(x=drivers.month, y=drivers.ambient_temp, mode="lines+markers",
-                                   line=dict(color=SERIES_ACTUAL, width=2), marker=dict(size=8),
-                                   hovertemplate="%{y:.1f} °C"))
-        shade_test_period(fig, data)
-        st.plotly_chart(style_figure(fig, 260, " °C", legend=False), width="stretch", config=PLOT_CONFIG)
-    with right:
-        section("Screenings done with an overdue tool")
-        fig = go.Figure(go.Bar(x=drivers.month, y=drivers.overdue_share * 100, marker_color=SERIES_ACTUAL,
-                               hovertemplate="%{y:.1f}%"))
-        shade_test_period(fig, data)
-        st.plotly_chart(style_figure(fig, 260, "%", legend=False), width="stretch", config=PLOT_CONFIG)
-
-# ============================================================================ 3. Factors
-def page_factors():
-    section("What goes with a confirmed defect", "Training data (10,000 screenings, actual outcomes).")
-    left, right = st.columns(2)
-    with left:
-        section("Defect rate by tension difference")
-        bands = fa.defect_rate_by_tension_band(data.train)
-        fig = go.Figure(go.Bar(x=bands.tension_band.astype(str), y=bands.defect_rate * 100, marker_color=SERIES_ACTUAL,
-                               customdata=bands.screenings, text=[pct(v * 100) for v in bands.defect_rate],
-                               textposition="outside", textfont=dict(color=INK_2),
-                               hovertemplate="%{y:.1f}% of %{customdata} screenings<extra></extra>"))
-        st.plotly_chart(style_figure(fig, 300, "%", legend=False), width="stretch", config=PLOT_CONFIG)
-    with right:
-        section("Measurements outside the normal range")
-        lift = fa.abnormal_measurement_lift(data.train)
-        fig = go.Figure()
-        fig.add_bar(y=lift.measurement, x=lift.rate_abnormal * 100, name="Outside normal range", orientation="h",
-                    marker_color=SERIES_PREDICTED, hovertemplate="%{x:.1f}%")
-        fig.add_bar(y=lift.measurement, x=lift.rate_normal * 100, name="Within normal range", orientation="h",
-                    marker_color=SERIES_ACTUAL, hovertemplate="%{x:.1f}%")
-        fig.update_layout(hovermode="y unified", yaxis=dict(autorange="reversed"))
-        fig = style_figure(fig, 300, "")
-        fig.update_xaxes(ticksuffix="%")
-        st.plotly_chart(fig, width="stretch", config=PLOT_CONFIG)
-        st.caption("Defect rate (%). " + "; ".join(
-            f"{r.measurement}: {r.times_more_likely:.0f}× more likely" for r in lift.itertuples()))
-
-    cols = st.columns(3)
-    for col, (column, title) in zip(cols, [("Tool_ID", "By tool"), ("Maintenance_Station", "By station"),
-                                           ("Belt_Supplier", "By belt supplier")]):
-        with col:
-            section(title)
-            rates = fa.defect_rate_by(data.train, column)
-            fig = go.Figure(go.Bar(x=rates.defect_rate * 100, y=rates[column], orientation="h",
-                                   marker_color=SERIES_ACTUAL, customdata=rates.screenings,
-                                   hovertemplate="%{x:.1f}% of %{customdata} screenings<extra></extra>"))
-            fig.update_layout(yaxis=dict(autorange="reversed"), hovermode="closest")
-            fig = style_figure(fig, 280, "", legend=False)
-            fig.update_xaxes(ticksuffix="%")
-            st.plotly_chart(fig, width="stretch", config=PLOT_CONFIG)
-    html('<div class="insight"><b>Reading this:</b> large tension errors, hot belts and high vibration are the '
-         'strongest warning signs. Tool-05, Station C and Supplier B have higher defect rates, but these overlap '
-         '(e.g. Tool-05 was the tool most often overdue), so they are associations, not separate proven causes.</div>')
-
-# ============================================================================ 4. Tools & calibration
-def page_tools():
-    section("Tool status", f"Latest month = {last_date:%B %Y}. Overdue = calibration load "
-                           f"(days × uses since calibration ÷ 1000) above {fa.OVERDUE_CALIBRATION_LOAD}.")
-    # Rates as percent numbers so the table can format them
-    tool_table = tools.assign(training_rate=tools.training_defect_rate * 100,
-                              test_rate=tools.predicted_defect_rate * 100,
-                              latest_rate=tools.latest_predicted_rate * 100,
-                              overdue_pct=tools.current_overdue_share * 100)
-    st.dataframe(
-        tool_table[["Tool_ID", "training_rate", "test_rate", "latest_rate", "days_since_calibration",
-                    "uses_since_calibration", "latest_tension_error", "overdue_pct"]],
-        hide_index=True, width="stretch",
-        column_config={
-            "Tool_ID": "Tool",
-            "training_rate": st.column_config.NumberColumn("Defects (training)", format="%.1f%%"),
-            "test_rate": st.column_config.NumberColumn("Predicted (test)", format="%.1f%%"),
-            "latest_rate": st.column_config.NumberColumn("Predicted (latest month)", format="%.1f%%"),
-            "days_since_calibration": st.column_config.NumberColumn("Days since cal.", format="%d"),
-            "uses_since_calibration": st.column_config.NumberColumn("Uses since cal.", format="%d"),
-            "latest_tension_error": st.column_config.NumberColumn("Avg tension diff.", format="%+.1f%%"),
-            "overdue_pct": st.column_config.NumberColumn("Overdue (test)", format="%.0f%%"),
-        })
-
-    left, right = st.columns([1, 2])
-    with left:
-        section("Defect rate by calibration load", "Training data")
-        calib = fa.defect_rate_by_calibration(data.train)
-        fig = go.Figure(go.Bar(x=calib.calibration_band.astype(str), y=calib.defect_rate * 100,
-                               marker_color=SERIES_ACTUAL, customdata=calib.screenings,
-                               text=[pct(v * 100) for v in calib.defect_rate], textposition="outside",
-                               textfont=dict(color=INK_2),
-                               hovertemplate="%{y:.1f}% of %{customdata} screenings<extra></extra>"))
-        st.plotly_chart(style_figure(fig, 300, "%", legend=False), width="stretch", config=PLOT_CONFIG)
-    with right:
-        tool_ids = tools.Tool_ID.tolist()
-        tool_id = st.selectbox("Tool over time", tool_ids, index=tool_ids.index(alert["tool_id"]))
-        drift = fa.tool_monthly_drift(data, tool_id)
-        sub_left, sub_right = st.columns(2)
-        for holder, column, title, suffix in [(sub_left, "days_since_calibration", "Days since calibration", ""),
-                                              (sub_right, "tension_error", "Avg tension difference", "%")]:
-            with holder:
-                section(title)
-                fig = go.Figure(go.Scatter(x=drift.month, y=drift[column], mode="lines+markers",
-                                           line=dict(color=SERIES_ACTUAL, width=2), marker=dict(size=8),
-                                           hovertemplate=f"%{{y:.1f}}{suffix}"))
-                shade_test_period(fig, data)
-                st.plotly_chart(style_figure(fig, 240, suffix, legend=False), width="stretch", config=PLOT_CONFIG)
-    html('<div class="insight"><b>Pattern:</b> when a tool goes long without calibration its belts read high on '
-         'tension and defects follow. Tool-05 did this in late 2024, Tool-01 in spring 2025, and Tool-03 now '
-         '(not calibrated since early 2025). Other tools stay near target.</div>')
-
-# ============================================================================ 5. Inspection list
-def page_inspection():
-    flagged = fa.flagged_screenings(data)
-    section("Screenings to inspect", f"{len(flagged)} test-period screenings are High Risk or Medium, "
-                                     "highest defect risk first.")
-    f1, f2, f3 = st.columns(3)
-    status_filter = f1.multiselect("Status", [fa.STATUS_HIGH, fa.STATUS_MEDIUM], [fa.STATUS_HIGH, fa.STATUS_MEDIUM])
-    tool_filter = f2.multiselect("Tool", sorted(flagged.Tool_ID.unique()))
-    station_filter = f3.multiselect("Station", sorted(flagged.Maintenance_Station.unique()))
-    view = flagged[flagged["Belt Status"].isin(status_filter)]
-    if tool_filter:
-        view = view[view.Tool_ID.isin(tool_filter)]
-    if station_filter:
-        view = view[view.Maintenance_Station.isin(station_filter)]
-    st.dataframe(view.assign(defect_probability=view.defect_probability * 100), hide_index=True, width="stretch",
-                 column_config={
-                     "Record_ID": "Record", "Aircraft_ID": "Aircraft", "Engine_ID": "Engine",
-                     config.DATE_COLUMN: st.column_config.DatetimeColumn("Screening", format="DD MMM YYYY"),
-                     "defect_probability": st.column_config.ProgressColumn("Defect risk", format="%.0f%%",
-                                                                           min_value=0, max_value=100),
-                     "Tension_Dev_Pct": st.column_config.NumberColumn("Tension difference", format="%+.1f%%"),
-                     "Tool_ID": "Tool", "Maintenance_Station": "Station", "Why": "Why flagged",
-                 })
-    st.download_button("Download inspection list (CSV)", view.to_csv(index=False), "inspection_list.csv", "text/csv")
-
-    st.divider()
-    section("Aircraft drill-down")
-    aircraft_id = st.selectbox("Aircraft", aircraft.Aircraft.tolist())
-    history = data.test[data.test.Aircraft_ID == aircraft_id].sort_values(config.DATE_COLUMN)
-    history = history.assign(status=history.apply(fa.belt_status, axis=1))
-    fig = go.Figure()
-    for status in fa.STATUS_ORDER:
-        part = history[history.status == status]
-        fig.add_scatter(x=part[config.DATE_COLUMN], y=part.defect_probability * 100, mode="markers", name=status,
-                        marker=dict(size=11, color=STATUS_COLOR[status], line=dict(color=SURFACE, width=2)),
-                        customdata=part[["Tool_ID", "Tension_Dev_Pct", "Engine_ID"]].values,
-                        hovertemplate="%{y:.0f}% risk · %{customdata[0]} · tension %{customdata[1]:+.1f}% · "
-                                      "%{customdata[2]}<extra>" + status + "</extra>")
-    fig.add_hline(y=data.threshold * 100, line=dict(color=MUTED, dash="dot", width=1),
-                  annotation_text="Yes threshold", annotation_font_color=MUTED)
-    fig.update_layout(hovermode="closest")
-    st.plotly_chart(style_figure(fig, 300, "%"), width="stretch", config=PLOT_CONFIG)
-    st.caption("Each dot is one screening in the test period; height = predicted defect risk.")
-
-# ============================================================================ 6. Model
-def page_model():
+# ============================================================================ dashboard
+def page_dashboard():
+    aircraft = fa.aircraft_status(data)
+    tools = fa.tool_summary(data)
+    alert = fa.fleet_alert(aircraft, tools)
     m = data.oof_metrics
-    section("Prediction model", "Average of LightGBM, CatBoost and logistic regression probabilities.")
+    n_high = int((aircraft["Belt Status"] == fa.STATUS_HIGH).sum())
+    n_flag = int((aircraft["Belt Status"] != fa.STATUS_NORMAL).sum())
+
+    html('<div class="kicker">Case 3 · Fleet belt health</div><div class="title">B787 fleet <b>findings</b></div>')
     c1, c2, c3, c4 = st.columns(4)
-    kpi(c1, "F1 (cross-validated)", f"{m['F1']:.3f}", "5-fold × 3 repeats, 10,000 rows")
-    kpi(c2, "Precision", f"{m['Precision']:.3f}", "flagged screenings that were defects")
-    kpi(c3, "Recall", f"{m['Recall']:.3f}", "defects that were flagged")
-    kpi(c4, "Yes threshold", f"{data.threshold:.3f}", "lowest within 0.01 F1 of best")
-    st.write("")
-    st.markdown(
-        "- **Inputs:** each screening's own measurements, tool calibration state, 30-day duty summary, "
-        "station, tool, supplier and batch. Technician and month were left out (they lowered validation F1).\n"
-        "- **Time check:** trained on the first 8,000 screenings by date and scored on the last 2,000: "
-        "F1 0.702, precision 0.687, recall 0.719.\n"
-        "- **Threshold:** set slightly low to favor catching defects, since the defect rate is trending upward.\n"
-        "- **Limits:** synthetic data; associations are not proof of cause; not a certified maintenance tool.")
-    submission = config.SUBMISSION_PATH
-    if submission.exists():
-        st.download_button("Download case_3_predictions.csv", submission.read_bytes(), "case_3_predictions.csv",
-                           "text/csv")
+    kpi(c1, "Aircraft flagged", f"{n_flag}<span> / {len(aircraft)}</span>", "High Risk or Medium, latest screening")
+    kpi(c2, "High Risk", f"{n_high}", "model predicts a defect: inspect first", accent=True)
+    kpi(c3, "Predicted defects", f"{int(data.test.predicted_defect.sum())}<span> / {len(data.test):,}</span>",
+        f"{data.test.predicted_defect.mean():.1%} of latest screenings vs {data.train.is_defect.mean():.1%} historically")
+    kpi(c4, "Model F1", f"{m['F1']:.2f}", "0.70 on a strict future-period test")
 
-# ============================================================================ layout: page + AI panel
-PAGE_FUNCTIONS = {"Fleet alert": page_fleet_alert, "Trends": page_trends, "Factors": page_factors,
-                  "Tools & calibration": page_tools, "Inspection list": page_inspection, "Model": page_model}
+    html(f'<div class="alert"><span class="tag">FLEET ALERT</span><div class="h">{escape(alert["headline"])} '
+         f'{escape(alert["detail"])}</div><div class="t">{escape(alert["factor"])}</div>'
+         f'<div class="act">Recommended: pull {escape(alert["tool_id"])} for calibration and inspect High Risk aircraft first. '
+         f'<span style="color:{MUTED};font-weight:500">Association, not proven cause.</span></div></div>')
 
-st.session_state.setdefault("ai_open", False)
-_, ai_button_col = st.columns([6, 1])
-with ai_button_col:
-    if st.button("✕ Close AI" if st.session_state.ai_open else "✨ AI", key="ai_toggle", width="stretch",
-                 type="secondary" if st.session_state.ai_open else "primary",
-                 help="Open the AI assistant: run the agent team's briefing and ask questions."):
-        st.session_state.ai_open = not st.session_state.ai_open
-        st.rerun()
+    left, right = st.columns([1.15, 1], gap="large")
+    with left:
+        section("Aircraft needing attention", "Latest screening per aircraft, highest risk first")
+        show_all = st.toggle("Show all 100 aircraft", value=False)
+        rows = aircraft if show_all else aircraft[aircraft["Belt Status"] != fa.STATUS_NORMAL]
+        body = "".join(
+            f'<tr><td class="ac">{escape(r.Aircraft)}</td><td>{badge(r["Belt Status"])}</td>'
+            f'<td>{r["Tension Difference"]:+.1f}%</td><td>{escape(r.Tool)}</td><td>{r["Defect risk"]:.0%}</td>'
+            f'<td class="why">{escape(r.Why)}</td></tr>' for _, r in rows.iterrows())
+        html('<div class="wrap" style="max-height:470px;overflow-y:auto"><table class="t"><thead><tr><th>Aircraft</th>'
+             '<th>Status</th><th>Tension</th><th>Tool</th><th>Risk</th><th>Why flagged</th></tr></thead>'
+             f'<tbody>{body}</tbody></table></div>')
+        html('<div class="note" style="margin-top:6px">High Risk = model predicts a defect. Medium = risk ≥ 20% or a '
+             'reading outside the normal range.</div>')
+    with right:
+        section("Defect rate by month", "Actual outcomes (green) and model predictions for the latest period (black)")
+        trend = fa.monthly_defect_trend(data)
+        fig = go.Figure()
+        for src, color, dash in [("Actual", GREEN, "solid"), ("Predicted", BLACK, "dash")]:
+            d = trend[trend.source == src]
+            fig.add_scatter(x=d.month, y=d.defect_rate * 100, mode="lines+markers", name=src,
+                            line=dict(color=color, width=2.4, dash=dash), marker=dict(size=6, color=color),
+                            hovertemplate="%{x|%b %Y}: %{y:.1f}%<extra>" + src + "</extra>")
+        st.plotly_chart(style_fig(fig, 250), width="stretch", config=PLOT)
 
-if st.session_state.ai_open:
-    main_col, panel_col = st.columns([1.85, 1], gap="medium")
-    with main_col:
-        PAGE_FUNCTIONS[page]()
-    with panel_col:
-        ai_panel.render(data)
-else:
-    PAGE_FUNCTIONS[page]()
+        c1, c2 = st.columns(2)
+        with c1:
+            section("By tool calibration load", "Overdue (>90) in black")
+            cal = fa.defect_rate_by_calibration(data.train)
+            fig = go.Figure(go.Bar(x=cal.calibration_band.astype(str), y=cal.defect_rate * 100,
+                                   marker_color=[BLACK if "overdue" in str(b) else GREEN for b in cal.calibration_band],
+                                   text=[f"{v:.1f}%" for v in cal.defect_rate * 100], textposition="outside",
+                                   hovertemplate="%{x}: %{y:.1f}%<extra></extra>"))
+            st.plotly_chart(style_fig(fig, 220), width="stretch", config=PLOT)
+        with c2:
+            section("By tension error", "More than 10% off target in black")
+            ten = fa.defect_rate_by_tension_band(data.train)
+            fig = go.Figure(go.Bar(x=ten.tension_band.astype(str), y=ten.defect_rate * 100,
+                                   marker_color=[BLACK if str(b) == ">10%" else GREEN for b in ten.tension_band],
+                                   text=[f"{v:.0f}%" for v in ten.defect_rate * 100], textposition="outside",
+                                   hovertemplate="%{x}: %{y:.1f}%<extra></extra>"))
+            st.plotly_chart(style_fig(fig, 220), width="stretch", config=PLOT)
+
+    section("Reports")
+    c1, c2, c3 = st.columns([1, 1, 2])
+    flagged = fa.flagged_screenings(data)
+    c1.download_button("⬇ Inspection list (CSV)", flagged.to_csv(index=False).encode(), "inspection_list.csv",
+                       "text/csv", width="stretch")
+    if config.SUBMISSION_PATH.exists():
+        c2.download_button("⬇ Model predictions (CSV)", config.SUBMISSION_PATH.read_bytes(), "case_3_predictions.csv",
+                           "text/csv", width="stretch")
+    c3.markdown(f'<div class="note">Model: average of LightGBM, CatBoost and logistic regression · cross-validated '
+                f'F1 {m["F1"]:.3f}, precision {m["Precision"]:.3f}, recall {m["Recall"]:.3f} · {len(flagged)} '
+                f'screenings in the inspection list.</div>', unsafe_allow_html=True)
+
+
+# ============================================================================ workflow
+def _load_sample():
+    if "wf_run" not in st.session_state and SAMPLE_RUN.exists():
+        st.session_state.wf_run = wf.WorkflowRun.from_json(SAMPLE_RUN.read_text())
+        st.session_state.wf_is_sample = True
+        st.session_state.wf_play = f"sample-{st.session_state.wf_run.run_id}"
+        st.session_state.wf_start = 0
+
+
+def _save_run(run):
+    try:
+        RUNS_DIR.mkdir(parents=True, exist_ok=True)
+        (RUNS_DIR / "last_run.json").write_text(run.to_json())
+    except OSError:
+        pass
+
+
+def page_workflow():
+    st.session_state.setdefault("wf_runs_used", 0)
+    _load_sample()
+    html('<div class="kicker">Applied AI workflow</div><div class="title">Belt-defect <b>maintenance workflow</b></div>')
+    html('<div class="note" style="margin:-6px 0 12px;font-size:13.5px">Screenings flow through a security agent and '
+         'the ML model; Quality & Safety, Logistics and Commercial agents pass results to each other; a security check '
+         'verifies every number; a person approves before anything is actioned.</div>')
+
+    key = settings.load_api_key(st.secrets)
+    c1, c2, c3, c4 = st.columns([1.3, 1, 1, 2.2])
+    batch = c1.selectbox("Batch", list(wf.BATCHES), label_visibility="collapsed")
+    runs_left = settings.MAX_BRIEFINGS_PER_SESSION - st.session_state.wf_runs_used
+    run_clicked = c2.button("▶ Run workflow", type="primary", width="stretch", disabled=not key or runs_left <= 0,
+                            help="Runs the real agents (about a minute, about $0.02).")
+    if c3.button("↺ Replay", width="stretch", help="Replay the animation of the current run (no AI cost)."):
+        st.session_state.wf_play = f"replay-{pd.Timestamp.now().value}"
+        st.session_state.wf_start = 0
+    run = st.session_state.get("wf_run")
+    caption = c4.empty()
+
+    if run_clicked:
+        lines = []
+        with st.status("Workflow running: agents are passing data to each other…", expanded=True) as status:
+            box = st.empty()
+
+            def on_event(e):
+                lines.append(f"`{e['t'][11:19]}` **{e['agent']}** · {e['message']}")
+                box.markdown("  \n".join(lines[-14:]))
+
+            run = wf.run_workflow(wf.make_client(key), data, batch, on_event=on_event)
+            status.update(label=f"Workflow finished · waiting for approval · {run.meter['tokens']:,} tokens · "
+                                f"${run.meter['usd']:.3f}", state="complete", expanded=False)
+        st.session_state.update(wf_run=run, wf_is_sample=False, wf_play=f"run-{run.run_id}", wf_start=0)
+        st.session_state.wf_runs_used += 1
+        _save_run(run)
+
+    runs_left = settings.MAX_BRIEFINGS_PER_SESSION - st.session_state.wf_runs_used
+    if not key:
+        caption.caption("No OpenAI key configured: showing the recorded sample run.")
+    elif st.session_state.get("wf_is_sample"):
+        caption.caption("Showing the recorded sample run. Press ▶ Run workflow for a live run.")
+    elif run:
+        caption.caption(f"Live run {run.run_id} · {runs_left} run(s) left this session.")
+    if not run:
+        st.info("No run yet. Add an OpenAI API key and press ▶ Run workflow.")
+        return
+
+    workflow_view.render(run, st.session_state.get("wf_play", run.run_id), st.session_state.get("wf_start", 0))
+    _approval_and_outputs(run)
+
+    with st.expander("Agent outputs (structured)"):
+        for step, label in [("quality", "Quality & Safety"), ("logistics", "Logistics"), ("commercial", "Commercial")]:
+            res = run.outputs.get(step) or {}
+            st.markdown(f"**{label} agent** · number check: "
+                        + ("passed ✓" if res and not res.get("ungrounded") and not res.get("error")
+                           else f"review {res.get('ungrounded') or res.get('error')}"))
+            st.json(res.get("output") or {}, expanded=False)
+    with st.expander("Full event log"):
+        log = pd.DataFrame(run.events)[["t", "agent", "kind", "message", "duration_s", "tokens", "usd"]]
+        st.dataframe(log, hide_index=True, width="stretch", height=320)
+        st.download_button("⬇ Event log (JSON)", json.dumps(run.events, indent=1, default=str),
+                           f"run_{run.run_id}_log.json", "application/json")
+    with st.expander("🔒 Security controls"):
+        st.markdown(
+            "- **Security agent (input):** schema, ID formats, value ranges and duplicates checked; rows with "
+            "instruction-like text are quarantined before the model or any agent sees them.\n"
+            "- **Least privilege:** agents only call read-only tools and calculators (allowlist per agent); no code, "
+            "web, file writes or ability to action work orders.\n"
+            "- **Security check (output):** every number an agent writes is verified against the model and data.\n"
+            "- **Hand-offs are data, not instructions:** agents are told never to obey text inside hand-offs.\n"
+            "- **Human gate:** nothing is issued until a person approves; the decision is logged with name and time.\n"
+            f"- **Spend limits:** {settings.MAX_TOOL_ROUNDS} tool rounds per agent, "
+            f"{settings.MAX_BRIEFINGS_PER_SESSION} runs per session, daily token cap; key in Secrets / `.env` only.\n"
+            "- **Assumptions labelled:** belt stock, calibration slots, flight estimates and unit costs are planning "
+            "assumptions, flagged as such to the agents and in the report.")
+
+
+def _approval_and_outputs(run):
+    o = run.outputs
+    q = (o.get("quality") or {}).get("output") or {}
+    lg = (o.get("logistics") or {}).get("output") or {}
+    c = (o.get("commercial") or {}).get("output") or {}
+    if run.status.get("approval") == "running":
+        belts = sum(p.get("belts_to_order", 0) for p in lg.get("parts_plan", []))
+        cost = (c.get("cost_summary") or {}).get("action_cost_usd")
+        html(f'<div class="appr"><div class="h">Your decision: approve the plan?</div>'
+             f'<div class="t">{escape(c.get("recommendation_to_approver", "Review the agents’ plan."))}</div>'
+             f'<div class="facts"><span class="fact"><b>{len(q.get("inspections", []))}</b> inspections</span>'
+             f'<span class="fact"><b>{len(q.get("tool_actions", []))}</b> tool actions</span>'
+             f'<span class="fact"><b>{belts}</b> belts to order</span>'
+             + (f'<span class="fact">plan cost <b>${cost:,}</b></span>' if cost is not None else "")
+             + '</div></div>')
+        c1, c2, c3, c4 = st.columns([1.2, 2, 0.8, 0.8])
+        who = c1.text_input("Approver", value="Maintenance manager")
+        note = c2.text_input("Comment (optional)", placeholder="Approved; inspect P1 aircraft before first departure")
+        if c3.button("✓ Approve", type="primary", width="stretch"):
+            idx = len(run.events)
+            st.session_state.wf_run = wf.approve_run(run, "Approved", who, note)
+            st.session_state.update(wf_play=f"approve-{run.run_id}", wf_start=idx)
+            _save_run(run)
+            st.rerun()
+        if c4.button("✕ Reject", width="stretch"):
+            idx = len(run.events)
+            st.session_state.wf_run = wf.approve_run(run, "Rejected", who, note)
+            st.session_state.update(wf_play=f"reject-{run.run_id}", wf_start=idx)
+            st.rerun()
+        return
+
+    if run.approval:
+        orders = (o.get("outputs") or {}).get("work_orders", [])
+        section("Outputs" if orders else "Decision recorded",
+                f"{run.approval['decision']} by {run.approval['approver']} at {run.approval['time'][11:19]} UTC")
+        if orders:
+            st.dataframe(pd.DataFrame(orders), hide_index=True, width="stretch",
+                         column_config={"detail": st.column_config.TextColumn(width="large")})
+            c1, c2, c3, c4 = st.columns([1, 1, 1.4, 1])
+            c1.download_button("⬇ Report (PDF)", share.run_pdf(run), f"workflow_report_{run.run_id}.pdf",
+                               "application/pdf", width="stretch")
+            c2.download_button("⬇ Work orders (CSV)", share.work_orders_csv(run), f"work_orders_{run.run_id}.csv",
+                               "text/csv", width="stretch")
+            to = c3.text_input("Email to", placeholder="maintenance.control@company.com", label_visibility="collapsed")
+            valid = "@" in to and "." in to.split("@")[-1]
+            c4.link_button("✉️ Email plan", share.mailto_link(to, f"Belt workflow {run.run_id}: work orders",
+                                                             share.run_text(run)) if valid else "mailto:",
+                           disabled=not valid, width="stretch")
+            st.caption("Email opens your own mail app with the plan filled in; attach the PDF for the full report.")
+
+
+# ============================================================================ router
+{"Dashboard": page_dashboard, "Workflow": page_workflow}[page]()

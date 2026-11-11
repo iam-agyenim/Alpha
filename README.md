@@ -79,26 +79,30 @@ Test prediction: 106 of 2,000 rows flagged (5.3%, vs 2.7% in training). The test
 covers the hot-season peak and a build-up of overdue tool calibrations, both strong defect drivers;
 see `scripts/check_test_distribution_shift.py`.
 
-## AI assistant (multi-agent layer)
+## Agentic maintenance workflow
 
-`belt_defect/agents/` adds a team of OpenAI agents on top of the trained model. Click **✨ AI** (top right) to open the
-assistant panel: **▶ Run briefing** runs four specialists (risk, measurements, tools & calibration, trends) in
-parallel with read-only tools over the model's predictions; a lead planner merges their findings into one
-prioritised action plan, shown in the chat. Ask follow-up questions in the same chat; a router picks the specialist.
-Each report has a **📤 Share** menu: email (opens your mail app), PDF or text download.
+The app has two pages (left sidebar): a minimal **Dashboard** of the findings and a **Workflow** page where the ML
+model and AI agents pass data and results to each other, shown as an animated diagram with a timestamped log:
+
+```
+Incoming data → Security agent → ML model → Orchestrator → Quality & Safety → Logistics → Commercial
+             → Security check → Human approval → Outputs (work orders, PDF, email)
+```
 
 | File | Role |
 |---|---|
-| `agents/tools.py` | 10 read-only tools (model output + statistics), sanitised JSON |
-| `agents/agent.py` | Capped tool-calling loop (OpenAI Responses API), number grounding check |
-| `agents/team.py` | Specialists, peer cross-checks, lead planner, chat router, audit log |
+| `agents/workflow.py` | The pipeline: intake, security rules, model scoring, routing, 3 agents, output check, approval, work orders, event log |
+| `agents/tools.py` | Read-only tools and calculators (batch risk, aircraft, tools, locations, parts and staff, flights, costs) |
+| `agents/agent.py` | Capped tool-calling loop (OpenAI Responses API), number grounding check, event callbacks |
 | `agents/guard.py` | Prompt-injection screening, output allowlist, grounding |
 | `agents/cost.py`, `agents/settings.py` | Token/cost meter, prices, models, spend limits |
-| `dashboard/ai_panel.py` | Slide-out AI chat panel (briefing, questions, Share menus) |
-| `dashboard/report_share.py` | PDF, text and email-link builders for the Share menu |
+| `dashboard/workflow_view.py` | Animated workflow visual (HTML/SVG/JS) replaying the real timestamped events |
+| `dashboard/report_share.py` | PDF report, work-order CSV and email link |
+| `outputs/workflow_runs/sample_run.json` | A recorded real run, replayed when no API key is set |
 
-The dashboard pages (Fleet alert, Trends, Factors, Tools & calibration, Inspection list, Model) are in the left sidebar.
+Theme: white, green (`#0B6B3A`) and black. Logistics and commercial facts the dataset doesn't hold (belt stock,
+calibration slots, flights, unit costs) are labelled planning assumptions (`OPS_ASSUMPTIONS` in `agents/tools.py`).
 
 **API key:** put `OPENAI_API_KEY=...` in `.env` (git-ignored) locally, or in Streamlit Cloud **Settings → Secrets**.
-Measured cost: about $0.03–0.05 per briefing, about $0.001 per question. Tests: `.venv/bin/python -m pytest tests`.
-See `PRESENTATION_GUIDE.md` sections 12–15 and `BUSINESS_CASE.md`.
+Measured cost: about $0.015–0.02 per workflow run. Tests: `.venv/bin/python -m pytest tests`.
+See `PRESENTATION_GUIDE.md` and `BUSINESS_CASE.md`.

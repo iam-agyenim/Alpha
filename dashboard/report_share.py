@@ -1,4 +1,4 @@
-"""Turn agent reports into a PDF, plain text and a pre-filled email link (for the Share buttons).
+"""Turn a workflow run into a PDF report, plain text, work-order CSV and a pre-filled email link.
 
 Email uses a mailto: link, so it opens the user's own email app with the report filled in; nothing is sent by
 the server and no email credentials are needed. A mailto link can't carry attachments, so download the PDF and
@@ -9,7 +9,7 @@ from urllib.parse import quote
 
 from fpdf import FPDF
 
-NAVY, BLUE, GREY = (27, 42, 90), (34, 80, 156), (82, 81, 78)
+NAVY, BLUE, GREY = (11, 11, 11), (11, 107, 58), (74, 79, 76)   # black, green, grey
 MAILTO_BODY_LIMIT = 1800          # keep mailto URLs within what email apps accept
 
 # Built-in PDF fonts are Latin-1 only; map the few symbols the agents use.
@@ -25,31 +25,35 @@ def _latin1(text) -> str:
 
 
 # --------------------------------------------------------------------------- plain text (email body, copy)
-def specialist_text(r) -> str:
-    out = r.output if isinstance(r.output, dict) else {}
-    lines = [f"{r.agent}: belt-health report", "", out.get("headline", ""), ""]
-    for i, f in enumerate(out.get("findings", []), 1):
-        lines += [f"{i}. [{f['severity'].upper()}] {f['finding']}", f"   Evidence: {f['evidence']}"]
-    if out.get("recommended_actions"):
-        lines += ["", "Recommended actions:"] + [f"- {a}" for a in out["recommended_actions"]]
-    if out.get("open_questions"):
-        lines += ["", "Open questions:"] + [f"- {q}" for q in out["open_questions"]]
-    lines += ["", f"Confidence: {out.get('confidence', '-')}. Number check: "
-              + ("passed" if not r.ungrounded and not r.error else f"review ({', '.join(r.ungrounded) or r.error})"),
-              "Decision support only; a qualified engineer makes every maintenance decision."]
-    return "\n".join(lines)
-
-
-def briefing_text(result) -> str:
-    plan = result.lead.output if isinstance(result.lead.output, dict) else {}
-    lines = ["B787 belt-health team briefing", "", plan.get("executive_summary", ""), "", "Priority actions:"]
-    for a in sorted(plan.get("priority_actions", []), key=lambda a: a["rank"]):
-        lines += [f"{a['rank']}. [{a['urgency']}] {a['action']} | Target: {a['target']} | Owner: {a['owner']}",
-                  f"   Evidence: {a['evidence']}"]
-    if plan.get("risks_and_caveats"):
-        lines += ["", "Risks and caveats:"] + [f"- {x}" for x in plan["risks_and_caveats"]]
+def run_text(run) -> str:
+    o = run.outputs
+    m = o.get("model", {})
+    c = (o.get("commercial") or {}).get("output") or {}
+    orders = (o.get("outputs") or {}).get("work_orders", [])
+    lines = [f"B787 belt-health workflow run {run.run_id} ({run.batch_label})", "",
+             f"Model: {m.get('predicted_defects', '-')} predicted defects, {m.get('aircraft_high_risk', '-')} aircraft "
+             f"High Risk, {m.get('aircraft_medium', '-')} Medium; tool most linked to risk: "
+             f"{m.get('tool_most_linked_to_risk', '-')}.", ""]
+    if c:
+        lines += ["Recommendation: " + c.get("recommendation_to_approver", ""), ""]
+    if run.approval:
+        lines += [f"Decision: {run.approval['decision']} by {run.approval['approver']} at {run.approval['time'][:16]} UTC", ""]
+    if orders:
+        lines += ["Work orders:"] + [f"- {w['id']} [{w['priority']}] {w['type']}: {w['target']} - {w['owner']}"
+                                     for w in orders]
     lines += ["", "Decision support only; a qualified engineer makes every maintenance decision."]
     return "\n".join(lines)
+
+
+def work_orders_csv(run) -> str:
+    import csv
+    import io
+    orders = (run.outputs.get("outputs") or {}).get("work_orders", [])
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=["id", "type", "target", "priority", "owner", "detail"])
+    w.writeheader()
+    w.writerows(orders)
+    return buf.getvalue()
 
 
 def mailto_link(to: str, subject: str, body: str) -> str:
@@ -71,7 +75,7 @@ class _Report(FPDF):
         self.set_font("Helvetica", "B", 9)
         self.set_text_color(*BLUE)
         self.cell(0, 6, "CASE 3 - B787 FLEET BELT HEALTH", new_x="LMARGIN", new_y="NEXT")
-        self.set_draw_color(168, 135, 58)
+        self.set_draw_color(11, 107, 58)
         self.set_line_width(0.6)
         self.line(16, self.get_y(), 40, self.get_y())
         self.ln(3)
@@ -109,62 +113,55 @@ class _Report(FPDF):
         self.para(f"-  {text}", indent=indent)
 
 
-def specialist_pdf(r) -> bytes:
-    out = r.output if isinstance(r.output, dict) else {}
-    pdf = _Report(f"{r.agent}: belt-health report")
-    pdf.title_block(f"{len(r.tool_log)} tool calls - confidence: {out.get('confidence', '-')} - number check: "
-                    + ("passed" if not r.ungrounded and not r.error else "review needed"))
-    pdf.para(out.get("headline", ""), size=12, bold=True)
-    pdf.heading("Findings")
-    for i, f in enumerate(out.get("findings", []), 1):
-        pdf.para(f"{i}. [{f['severity'].upper()}] {f['finding']}", bold=True)
-        pdf.para(f"Evidence: {f['evidence']}", size=9.5, color=GREY, indent=5)
-        pdf.ln(1)
-    if out.get("recommended_actions"):
-        pdf.heading("Recommended actions")
-        for a in out["recommended_actions"]:
-            pdf.bullet(a)
-    if out.get("open_questions"):
-        pdf.heading("Open questions")
-        for q in out["open_questions"]:
-            pdf.bullet(q)
-    pdf.heading("Data used")
-    pdf.para(" · ".join(f"{t['tool']}({', '.join(f'{k}={v}' for k, v in t['args'].items())})" for t in r.tool_log)
-             or "none", size=9, color=GREY)
+def run_pdf(run) -> bytes:
+    o = run.outputs
+    pdf = _Report(f"Maintenance workflow report - run {run.run_id}")
+    meter = run.meter or {}
+    pdf.title_block(f"Batch: {run.batch_label} - started {run.started[:16].replace('T', ' ')} UTC - "
+                    f"{meter.get('tokens', 0):,} tokens - ${meter.get('usd', 0):.3f}")
+    m, sec = o.get("model", {}), o.get("security_input", {})
+    pdf.heading("1. Data and security")
+    pdf.para(f"{sec.get('rows_received', '-')} screenings received, {sec.get('rows_valid', '-')} valid, "
+             f"{sec.get('rows_quarantined', '-')} quarantined. " + "; ".join(sec.get("issues", [])))
+    pdf.heading("2. ML model results")
+    pdf.para(f"{m.get('predicted_defects', '-')} predicted defects; {m.get('aircraft_high_risk', '-')} aircraft High Risk, "
+             f"{m.get('aircraft_medium', '-')} Medium. Tool most linked to risk: {m.get('tool_most_linked_to_risk', '-')}. "
+             f"{m.get('model', '')}")
+    q = (o.get("quality") or {}).get("output") or {}
+    if q:
+        pdf.heading("3. Quality & Safety agent")
+        pdf.para(q.get("summary", ""))
+        for x in q.get("inspections", []):
+            pdf.bullet(f"{x['priority']} {x['aircraft']} {x['engine']}: {x['reason']}")
+        for t in q.get("tool_actions", []):
+            pdf.bullet(f"{t['tool']}: {t['action']} - {t['reason']}")
+    lg = (o.get("logistics") or {}).get("output") or {}
+    if lg:
+        pdf.heading("4. Logistics agent")
+        pdf.para(lg.get("summary", ""))
+        for p in lg.get("parts_plan", []):
+            pdf.bullet(f"{p['station']}: belts needed {p['belts_needed']}, in stock {p['belts_in_stock']}, "
+                       f"to order {p['belts_to_order']}")
+        for c in lg.get("calibration_plan", []):
+            pdf.bullet(f"{c['tool']}: calibration slot {c['slot']}, loan tool {c['loan_tool']}")
+    c = (o.get("commercial") or {}).get("output") or {}
+    if c:
+        pdf.heading("5. Commercial agent")
+        pdf.para(c.get("summary", ""))
+        cs = c.get("cost_summary", {})
+        pdf.para(f"Plan cost ${cs.get('action_cost_usd', 0):,} vs predicted defect cost at risk "
+                 f"${cs.get('predicted_defect_cost_at_risk_usd', 0):,}. {cs.get('note', '')}")
+        pdf.para("Recommendation: " + c.get("recommendation_to_approver", ""), bold=True)
+    pdf.heading("6. Security output check")
+    for k, v in (o.get("security_output") or {}).items():
+        pdf.bullet(f"{k}: {v}")
+    pdf.heading("7. Decision and work orders")
+    if run.approval:
+        pdf.para(f"{run.approval['decision']} by {run.approval['approver']} at {run.approval['time'][:16]} UTC. "
+                 f"{run.approval.get('comment', '')}", bold=True)
+    for w in (o.get("outputs") or {}).get("work_orders", []):
+        pdf.bullet(f"{w['id']} [{w['priority']}] {w['type']}: {w['target']} - {w['owner']}. {w['detail']}")
     pdf.ln(2)
-    pdf.para("Associations are not proof of cause. Decision support only; a qualified engineer makes every "
-             "maintenance decision.", size=9, color=GREY)
-    return bytes(pdf.output())
-
-
-def briefing_pdf(result) -> bytes:
-    plan = result.lead.output if isinstance(result.lead.output, dict) else {}
-    pdf = _Report("Team briefing: action plan")
-    pdf.title_block(f"{len(result.specialists)} specialists + lead planner - {result.meter.total_tokens:,} tokens - "
-                    f"${result.meter.total_usd:.3f}")
-    pdf.para(plan.get("executive_summary", ""), size=11.5)
-    pdf.heading("Priority actions")
-    for a in sorted(plan.get("priority_actions", []), key=lambda a: a["rank"]):
-        pdf.para(f"{a['rank']}. [{a['urgency']}] {a['action']}", bold=True)
-        pdf.para(f"Target: {a['target']}  |  Owner: {a['owner']}  |  Raised by: {', '.join(a['raised_by'])}",
-                 size=9.5, indent=5)
-        pdf.para(f"Evidence: {a['evidence']}", size=9.5, color=GREY, indent=5)
-        pdf.ln(1)
-    if plan.get("cross_checks"):
-        pdf.heading("How the agents checked each other")
-        for c in plan["cross_checks"]:
-            pdf.bullet(f"{c['topic']} ({', '.join(c['agents'])}): {c['outcome']}")
-    if plan.get("risks_and_caveats"):
-        pdf.heading("Risks and caveats")
-        for x in plan["risks_and_caveats"]:
-            pdf.bullet(x)
-    if plan.get("cost_of_inaction"):
-        pdf.heading("Cost of doing nothing")
-        pdf.para(plan["cost_of_inaction"])
-    for r in result.specialists:
-        o = r.output if isinstance(r.output, dict) else {}
-        pdf.heading(f"Specialist: {r.agent}")
-        pdf.para(o.get("headline", r.error or ""), bold=True)
-        for f in o.get("findings", []):
-            pdf.bullet(f"[{f['severity'].upper()}] {f['finding']}")
+    pdf.para("Logistics and commercial figures use planning assumptions. Associations are not proof of cause. "
+             "Decision support only; a qualified engineer makes every maintenance decision.", size=9, color=GREY)
     return bytes(pdf.output())

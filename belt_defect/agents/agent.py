@@ -43,12 +43,15 @@ class Agent:
     max_output_tokens: int = MAX_OUTPUT_TOKENS
 
     def instructions(self) -> str:
-        return f"You are the {self.name} on an aircraft belt-health analysis team.\n{self.role}\n\n{SECURITY_RULES}"
+        return (f"You are the {self.name} in an automated maintenance workflow for a B787 fleet. An ML model scores "
+                f"belt-defect risk; agents pass results to each other.\n{self.role}\n\n{SECURITY_RULES}")
 
     def run(self, client, data, task: str, meter: CostMeter, output_schema: dict | None = None,
-            context: str = "", evidence: list | None = None) -> AgentResult:
-        """evidence = tool results handed over in `context` (lead agent); numbers from it count as grounded."""
+            context: str = "", evidence: list | None = None, on_event=None) -> AgentResult:
+        """evidence = results handed over in `context`; numbers from it count as grounded.
+        on_event(kind, message, payload) is called for each model call and tool call (for the workflow log)."""
         start, tool_log = time.time(), []
+        emit = on_event or (lambda *_: None)
         user_content = (f"{context}\n\n" if context else "") + task
         conversation = [{"role": "user", "content": user_content}]
         text_format = ({"format": {"type": "json_schema", "name": "report", "schema": output_schema, "strict": True}}
@@ -64,6 +67,7 @@ class Agent:
                     kwargs["tools"] = openai_tool_specs(self.tools)
                 if text_format:
                     kwargs["text"] = text_format
+                emit("think", f"Reasoning with {self.model}", {"round": _round + 1})
                 response = client.responses.create(**kwargs)
                 meter.add(self.name, self.model, response.usage.input_tokens, response.usage.output_tokens)
 
@@ -79,6 +83,8 @@ class Agent:
                         args = {}
                     result = call_tool(data, c.name, args, self.tools)
                     tool_log.append({"tool": c.name, "args": args, "result": result})
+                    emit("tool", f"Called {c.name}({', '.join(f'{k}={v}' for k, v in args.items())})",
+                         {"tool": c.name, "args": args, "error": result.get("error") if isinstance(result, dict) else None})
                     conversation.append({"type": "function_call_output", "call_id": c.call_id,
                                          "output": json.dumps(result)})
             return AgentResult(self.name, "", tool_log, seconds=time.time() - start,

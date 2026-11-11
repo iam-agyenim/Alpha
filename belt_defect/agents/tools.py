@@ -1,11 +1,12 @@
-"""Read-only tools the agents can call.
+"""Read-only tools the workflow agents can call.
 
-Every tool reads the trained model's saved predictions and the training data through fleet_analysis,
-returns a small JSON-ready summary (never raw rows in bulk), and passes through guard.sanitize.
-No tool can write, delete, run code or reach the internet.
-Percentages are returned as percent numbers (6.6 means 6.6%).
+Facts come from the trained model's saved predictions and the maintenance data. Logistics and commercial facts
+the dataset doesn't hold (belt stock, calibration slots, flight schedule, unit costs) come from OPS_ASSUMPTIONS
+and are always labelled as assumptions. Every tool returns a small JSON summary and passes through
+guard.sanitize; no tool can write, delete, run code or reach the internet. Percentages are percent numbers.
 """
 import re
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import pandas as pd
@@ -16,8 +17,33 @@ from .guard import sanitize
 
 AIRCRAFT_RE = re.compile(r"^B787-\d{3}$")
 TOOL_RE = re.compile(r"^Tool-\d{2}$")
-FACTORS = ["tension_band", "calibration_band", "tool", "station", "supplier"]
 STATUSES = [fa.STATUS_HIGH, fa.STATUS_MEDIUM, fa.STATUS_NORMAL, "any"]
+
+OPS_ASSUMPTIONS = {
+    "belt_stock_by_station": {"Station A": 4, "Station B": 3, "Station C": 2},
+    "belt_order_lead_time_days": 2,
+    "calibration_lab_slots": ["Today 14:00", "Today 16:00", "Tomorrow 09:00", "Tomorrow 11:00"],
+    "technicians_per_shift_by_station": {"Station A": 3, "Station B": 2, "Station C": 2},
+    "inspection_hours_per_aircraft": 1.5,
+    "shift_hours": 8,
+    "average_sector_hours": 4.5,
+    "cost_per_defect_usd": 5000,
+    "inspection_cost_usd": 300,
+    "calibration_cost_usd": 150,
+    "aog_event_cost_usd": 100000,
+}
+
+
+@dataclass
+class ToolContext:
+    """What tools can see: fleet data (model predictions + training data), the batch being processed, assumptions."""
+    data: fa.FleetData
+    batch: pd.DataFrame
+    ops: dict = field(default_factory=lambda: dict(OPS_ASSUMPTIONS))
+
+    @property
+    def batch_data(self) -> fa.FleetData:
+        return replace(self.data, test=self.batch)
 
 
 def _pct(x, digits=1):
@@ -28,167 +54,156 @@ def _num(x, digits=1):
     return None if x is None or pd.isna(x) else round(float(x), digits)
 
 
-# --------------------------------------------------------------------------- tool functions
-def fleet_overview(data: fa.FleetData) -> dict:
-    aircraft = fa.aircraft_status(data)
-    tools = fa.tool_summary(data)
-    alert = fa.fleet_alert(aircraft, tools)
+def _latest_by_aircraft(df: pd.DataFrame) -> pd.DataFrame:
+    return df.sort_values(config.DATE_COLUMN).groupby("Aircraft_ID").tail(1).set_index("Aircraft_ID")
+
+
+# --------------------------------------------------------------------------- quality and safety
+def batch_risk_summary(ctx: ToolContext) -> dict:
+    b = ctx.batch_data
+    aircraft = fa.aircraft_status(b)
+    tools = fa.tool_summary(b)
     counts = aircraft["Belt Status"].value_counts()
     return {
-        "aircraft_total": int(len(aircraft)),
-        "aircraft_by_status_latest_screening": {s: int(counts.get(s, 0)) for s in fa.STATUS_ORDER},
-        "test_period": f"{data.test[config.DATE_COLUMN].min():%Y-%m-%d} to {data.test[config.DATE_COLUMN].max():%Y-%m-%d}",
-        "test_screenings": int(len(data.test)),
-        "test_predicted_defects": int(data.test.predicted_defect.sum()),
-        "test_predicted_defect_rate_pct": _pct(data.test.predicted_defect.mean()),
-        "training_screenings": int(len(data.train)),
-        "training_defect_rate_pct": _pct(data.train[config.LABEL_COLUMN].mean()),
-        "yes_threshold_pct": _pct(data.threshold),
-        "medium_rule": "defect risk >= 20% or any measurement outside the normal range",
-        "problem_tool": alert["tool_id"],
+        "batch_period": f"{ctx.batch[config.DATE_COLUMN].min():%Y-%m-%d} to {ctx.batch[config.DATE_COLUMN].max():%Y-%m-%d}",
+        "screenings": int(len(ctx.batch)), "aircraft": int(ctx.batch.Aircraft_ID.nunique()),
+        "predicted_defects": int(ctx.batch.predicted_defect.sum()),
+        "predicted_defect_rate_pct": _pct(ctx.batch.predicted_defect.mean()),
+        "aircraft_by_status": {s: int(counts.get(s, 0)) for s in fa.STATUS_ORDER},
+        "yes_threshold_pct": _pct(ctx.data.threshold),
+        "tool_most_linked_to_risk": tools.iloc[0].Tool_ID,
+        "model": "average of LightGBM, CatBoost and logistic regression; cross-validated F1 0.751",
     }
 
 
-def list_aircraft(data: fa.FleetData, status: str, limit: int) -> dict:
+def list_aircraft(ctx: ToolContext, status: str, limit: int) -> dict:
     if status not in STATUSES:
         return {"error": f"status must be one of {STATUSES}"}
-    limit = int(min(max(limit, 1), 25))
-    table = fa.aircraft_status(data)
+    table = fa.aircraft_status(ctx.batch_data)
     if status != "any":
         table = table[table["Belt Status"] == status]
-    rows = [{
-        "aircraft": r.Aircraft, "status": r._2, "defect_risk_pct": _pct(r._7),
-        "tension_difference_pct": _num(r._3), "tool": r.Tool, "engine": r.Engine,
-        "screening_date": str(r._6), "reasons": r.Why[:160],
-    } for r in table.head(limit).itertuples()]
-    return {"status_filter": status, "matching_aircraft": int(len(table)), "shown": len(rows), "aircraft": rows}
+    rows = [{"aircraft": r.Aircraft, "status": r._2, "defect_risk_pct": _pct(r._7),
+             "tension_difference_pct": _num(r._3), "tool": r.Tool, "engine": r.Engine,
+             "screening_date": str(r._6), "reasons": r.Why[:150]}
+            for r in table.head(int(min(max(limit, 1), 25))).itertuples()]
+    return {"status_filter": status, "matching_aircraft": int(len(table)), "aircraft": rows}
 
 
-def aircraft_history(data: fa.FleetData, aircraft_id: str) -> dict:
+def aircraft_history(ctx: ToolContext, aircraft_id: str) -> dict:
     if not AIRCRAFT_RE.match(aircraft_id or ""):
         return {"error": "aircraft_id must look like B787-022"}
-    rows = data.test[data.test.Aircraft_ID == aircraft_id].sort_values(config.DATE_COLUMN)
+    rows = ctx.data.test[ctx.data.test.Aircraft_ID == aircraft_id].sort_values(config.DATE_COLUMN)
     if rows.empty:
-        return {"error": f"no test-period screenings for {aircraft_id}"}
-    out = []
-    for _, r in rows.tail(30).iterrows():
-        out.append({
-            "date": f"{r[config.DATE_COLUMN]:%Y-%m-%d}", "engine": r.Engine_ID, "tool": r.Tool_ID,
-            "defect_risk_pct": _pct(r.defect_probability), "status": fa.belt_status(r),
-            "tension_difference_pct": _num(r.Tension_Dev_Pct), "belt_temperature_c": _num(r.Belt_Temperature_C),
-            "vibration_mm_s": _num(r.Belt_Vibration_mm_s),
-            "tool_days_since_calibration": _num(r.Days_Since_Tool_Calibration, 0),
-            "tool_overdue": bool(r.calibration_overdue),
-        })
-    return {"aircraft": aircraft_id, "screenings_in_test_period": int(len(rows)),
-            "predicted_defects": int(rows.predicted_defect.sum()), "latest_screenings": out}
+        return {"error": f"no recent screenings for {aircraft_id}"}
+    return {"aircraft": aircraft_id, "screenings": int(len(rows)), "predicted_defects": int(rows.predicted_defect.sum()),
+            "latest": [{"date": f"{r[config.DATE_COLUMN]:%Y-%m-%d}", "engine": r.Engine_ID, "tool": r.Tool_ID,
+                        "station": r.Maintenance_Station, "defect_risk_pct": _pct(r.defect_probability),
+                        "status": fa.belt_status(r), "tension_difference_pct": _num(r.Tension_Dev_Pct),
+                        "belt_temperature_c": _num(r.Belt_Temperature_C), "vibration_mm_s": _num(r.Belt_Vibration_mm_s)}
+                       for _, r in rows.tail(8).iterrows()]}
 
 
-def tool_status(data: fa.FleetData) -> dict:
-    t = fa.tool_summary(data)
+def tools_at_risk(ctx: ToolContext) -> dict:
+    t = fa.tool_summary(ctx.batch_data)
     return {"overdue_rule": f"calibration load (days x uses / 1000) above {fa.OVERDUE_CALIBRATION_LOAD}",
-            "latest_month": f"{data.test.month.max():%Y-%m}",
-            "tools": [{
-                "tool": r.Tool_ID, "training_defect_rate_pct": _pct(r.training_defect_rate),
-                "test_predicted_defect_rate_pct": _pct(r.predicted_defect_rate),
-                "latest_month_predicted_defect_rate_pct": _pct(r.latest_predicted_rate),
-                "days_since_calibration": _num(r.days_since_calibration, 0),
-                "uses_since_calibration": _num(r.uses_since_calibration, 0),
-                "latest_avg_tension_difference_pct": _num(r.latest_tension_error),
-                "test_overdue_share_pct": _pct(r.current_overdue_share, 0),
-                "test_screenings": int(r.screenings),
-            } for r in t.itertuples()]}
+            "tools": [{"tool": r.Tool_ID, "days_since_calibration": _num(r.days_since_calibration, 0),
+                       "uses_since_calibration": _num(r.uses_since_calibration, 0),
+                       "calibration_load": _num(r.days_since_calibration * r.uses_since_calibration / 1000, 0),
+                       "avg_tension_difference_pct": _num(r.latest_tension_error),
+                       "predicted_defect_rate_pct": _pct(r.latest_predicted_rate),
+                       "training_defect_rate_pct": _pct(r.training_defect_rate)} for r in t.itertuples()]}
 
 
-def tool_history(data: fa.FleetData, tool_id: str) -> dict:
-    if not TOOL_RE.match(tool_id or ""):
-        return {"error": "tool_id must look like Tool-03"}
-    drift = fa.tool_monthly_drift(data, tool_id)
-    if drift.empty:
-        return {"error": f"unknown tool {tool_id}"}
-    return {"tool": tool_id, "months": [{
-        "month": f"{r.month:%Y-%m}", "source": r.source,
-        "avg_days_since_calibration": _num(r.days_since_calibration, 0),
-        "avg_tension_difference_pct": _num(r.tension_error), "defect_rate_pct": _pct(r.defect_rate),
-    } for r in drift.itertuples()]}
+def measurement_signals(ctx: ToolContext) -> dict:
+    lift = fa.abnormal_measurement_lift(ctx.data.train)
+    b = ctx.batch
+    disagree = b[b.abnormal_any & (b.defect_probability < fa.MEDIUM_RISK_PROBABILITY)]
+    return {"normal_range_upper_limits": {fa.MEASUREMENTS[c][0]: _num(v) for c, v in ctx.data.normal_limits.items()},
+            "times_more_likely_if_abnormal": {r.measurement: _num(r.times_more_likely) for r in lift.itertuples()},
+            "abnormal_screenings_in_batch": {fa.MEASUREMENTS[c][0]: int(b[f"abnormal_{c}"].sum()) for c in fa.MEASUREMENTS},
+            "abnormal_but_model_low_risk": int(len(disagree)),
+            "abnormal_but_low_risk_aircraft": sorted(disagree.Aircraft_ID.unique().tolist())[:10]}
 
 
-def measurement_signals(data: fa.FleetData) -> dict:
-    lift = fa.abnormal_measurement_lift(data.train)
-    limits = {fa.MEASUREMENTS[c][0]: _num(v) for c, v in data.normal_limits.items()}
-    test = data.test
-    abnormal_counts = {fa.MEASUREMENTS[c][0]: int(test[f"abnormal_{c}"].sum()) for c in fa.MEASUREMENTS}
-    # Peer check: measurement says risky, model says low risk
-    disagree = test[test.abnormal_any & (test.defect_probability < fa.MEDIUM_RISK_PROBABILITY)]
-    examples = [{
-        "record": r[config.ID_COLUMN], "aircraft": r.Aircraft_ID, "date": f"{r[config.DATE_COLUMN]:%Y-%m-%d}",
-        "defect_risk_pct": _pct(r.defect_probability), "reasons": fa.screening_reasons(r, data.normal_limits)[:160],
-    } for _, r in disagree.sort_values(config.DATE_COLUMN).tail(8).iterrows()]
-    return {
-        "normal_range_upper_limits": limits,
-        "normal_range_rule": "99% of defect-free training screenings were inside these limits",
-        "training_lift": [{"measurement": r.measurement, "defect_rate_if_abnormal_pct": _pct(r.rate_abnormal),
-                           "defect_rate_if_normal_pct": _pct(r.rate_normal),
-                           "times_more_likely": _num(r.times_more_likely)} for r in lift.itertuples()],
-        "test_abnormal_screenings": abnormal_counts,
-        "abnormal_but_model_low_risk": {"count": int(len(disagree)), "latest_examples": examples},
-    }
+# --------------------------------------------------------------------------- logistics
+def aircraft_locations(ctx: ToolContext, aircraft_ids: list) -> dict:
+    ids = [a for a in (aircraft_ids or []) if AIRCRAFT_RE.match(str(a))][:25]
+    latest = _latest_by_aircraft(ctx.data.test)
+    return {"source": "station of each aircraft's latest screening",
+            "aircraft": [{"aircraft": a, "station": latest.loc[a, "Maintenance_Station"],
+                          "engine": latest.loc[a, "Engine_ID"], "last_screening": f"{latest.loc[a, config.DATE_COLUMN]:%Y-%m-%d}"}
+                         for a in ids if a in latest.index]}
 
 
-def defect_rate_by_factor(data: fa.FleetData, factor: str) -> dict:
-    train = data.train
-    if factor == "tension_band":
-        t, col = fa.defect_rate_by_tension_band(train), "tension_band"
-    elif factor == "calibration_band":
-        t, col = fa.defect_rate_by_calibration(train), "calibration_band"
-    elif factor in ("tool", "station", "supplier"):
-        col = {"tool": "Tool_ID", "station": "Maintenance_Station", "supplier": "Belt_Supplier"}[factor]
-        t = fa.defect_rate_by(train, col)
-    else:
-        return {"error": f"factor must be one of {FACTORS}"}
-    return {"factor": factor, "source": "training data, actual outcomes",
-            "groups": [{"group": str(r[col]), "defect_rate_pct": _pct(r.defect_rate),
-                        "screenings": int(r.screenings)} for _, r in t.iterrows()]}
+def logistics_context(ctx: ToolContext) -> dict:
+    t = fa.tool_summary(ctx.batch_data)
+    load = t.days_since_calibration * t.uses_since_calibration / 1000
+    o = ctx.ops
+    return {"ASSUMPTION": "stock, slots and staffing are planning assumptions, not data",
+            "belt_stock_by_station": o["belt_stock_by_station"],
+            "belt_order_lead_time_days": o["belt_order_lead_time_days"],
+            "calibration_lab_slots": o["calibration_lab_slots"],
+            "technicians_per_shift_by_station": o["technicians_per_shift_by_station"],
+            "inspection_hours_per_aircraft": o["inspection_hours_per_aircraft"], "shift_hours": o["shift_hours"],
+            "loan_tools_in_calibration": sorted(t.loc[load < 60, "Tool_ID"].tolist())}
 
 
-def monthly_trend(data: fa.FleetData) -> dict:
-    t = fa.monthly_defect_trend(data)
-    return {"note": "Actual = confirmed outcomes; Predicted = model predictions for the test period",
-            "months": [{"month": f"{r.month:%Y-%m}", "source": r.source, "defect_rate_pct": _pct(r.defect_rate),
-                        "screenings": int(r.screenings), "avg_ambient_temp_c": _num(r.ambient_temp),
-                        "overdue_tool_share_pct": _pct(r.overdue_share, 0),
-                        "avg_abs_tension_difference_pct": _num(r.tension_error)} for r in t.itertuples()]}
+def plan_parts_and_staff(ctx: ToolContext, aircraft_ids: list) -> dict:
+    """Calculator: belts needed per station vs stock, and technician hours vs one shift, for the given aircraft."""
+    ids = [a for a in (aircraft_ids or []) if AIRCRAFT_RE.match(str(a))][:40]
+    latest = _latest_by_aircraft(ctx.data.test)
+    stations = pd.Series([latest.loc[a, "Maintenance_Station"] for a in ids if a in latest.index], dtype=object)
+    o = ctx.ops
+    out = []
+    for station in sorted(set(stations) | set(o["belt_stock_by_station"])):
+        needed = int((stations == station).sum())
+        stock = int(o["belt_stock_by_station"].get(station, 0))
+        hours = needed * o["inspection_hours_per_aircraft"]
+        capacity = o["technicians_per_shift_by_station"].get(station, 0) * o["shift_hours"]
+        out.append({"station": station, "belts_needed": needed, "belts_in_stock": stock,
+                    "belts_to_order": max(needed - stock, 0), "technician_hours_needed": round(hours, 1),
+                    "technician_hours_per_shift": capacity, "fits_in_one_shift": hours <= capacity})
+    return {"ASSUMPTION": "one replacement belt reserved per inspected aircraft; stock and staffing are assumptions",
+            "aircraft_counted": int(len(stations)), "stations": out,
+            "total_belts_to_order": int(sum(s["belts_to_order"] for s in out))}
 
 
-def seasonal_comparison(data: fa.FleetData) -> dict:
-    """Same calendar months a year apart (actual for training months, predicted for test months)."""
-    t = fa.monthly_defect_trend(data)
-    t = t.assign(year=t.month.dt.year, cal_month=t.month.dt.month)
-    t = t.sort_values("source").drop_duplicates(["year", "cal_month"])   # prefer Actual where both exist
-    pivot = t.pivot(index="cal_month", columns="year", values="defect_rate")
+# --------------------------------------------------------------------------- commercial
+def cost_of_plan(ctx: ToolContext, inspections: int, calibrations: int) -> dict:
+    """Calculator: cost of the proposed actions vs predicted defect cost at risk in this batch."""
+    o = ctx.ops
+    inspections, calibrations = max(int(inspections), 0), max(int(calibrations), 0)
+    action_cost = inspections * o["inspection_cost_usd"] + calibrations * o["calibration_cost_usd"]
+    at_risk = int(ctx.batch.predicted_defect.sum()) * o["cost_per_defect_usd"]
+    return {"ASSUMPTION": "unit costs are planning assumptions", "inspections": inspections,
+            "calibrations": calibrations, "inspection_cost_usd": inspections * o["inspection_cost_usd"],
+            "calibration_cost_usd": calibrations * o["calibration_cost_usd"], "action_cost_usd": action_cost,
+            "predicted_defect_cost_at_risk_usd": at_risk, "one_aog_event_usd": o["aog_event_cost_usd"],
+            "cost_to_risk_ratio_pct": round(action_cost / at_risk * 100, 1) if at_risk else None}
+
+
+def flight_exposure(ctx: ToolContext, aircraft_ids: list) -> dict:
+    ids = [a for a in (aircraft_ids or []) if AIRCRAFT_RE.match(str(a))][:25]
+    latest = _latest_by_aircraft(ctx.data.test)
+    sector = ctx.ops["average_sector_hours"]
     rows = []
-    for m, r in pivot.iterrows():
-        vals = {str(y): _pct(v) for y, v in r.items() if not pd.isna(v)}
-        if len(vals) >= 2:
-            rows.append({"calendar_month": int(m), **{f"defect_rate_{y}_pct": v for y, v in vals.items()}})
-    tr = data.train
-    spring_rows = tr[tr.month.dt.month.isin([4, 5])]
-    spring = spring_rows.groupby(spring_rows.month.dt.year)[config.LABEL_COLUMN].mean()   # actual, all screenings
-    return {"same_month_comparison": rows,
-            "apr_may_defect_rate_pct_by_year": {str(y): _pct(v) for y, v in spring.items()}}
+    for a in ids:
+        if a in latest.index:
+            hours_per_day = float(latest.loc[a, "Operating_Hours_Last_30_Days"]) / 30
+            rows.append({"aircraft": a, "flight_hours_per_day": round(hours_per_day, 1),
+                         "estimated_flights_next_24h": int(round(hours_per_day / sector))})
+    return {"ASSUMPTION": f"flights estimated from 30-day operating hours and a {sector}h average sector",
+            "aircraft": rows, "total_estimated_flights_next_24h": int(sum(r["estimated_flights_next_24h"] for r in rows))}
 
 
-def model_card(data: fa.FleetData) -> dict:
-    m = data.oof_metrics
-    return {"model": "average of LightGBM, CatBoost and logistic regression probabilities",
-            "cross_validated": {"f1": _num(m["F1"], 3), "precision": _num(m["Precision"], 3),
-                                "recall": _num(m["Recall"], 3), "scheme": "5-fold x 3 repeats on 10000 rows"},
-            "time_based_check": {"f1": 0.702, "precision": 0.687, "recall": 0.719,
-                                 "scheme": "train on first 8000 by date, predict last 2000"},
-            "yes_threshold_pct": _pct(data.threshold),
-            "excluded_inputs": ["Technician_ID", "month"],
-            "limits": ["synthetic data", "associations are not proof of cause",
-                       "decision support only, not a certified maintenance system"]}
+def cost_context(ctx: ToolContext) -> dict:
+    o = ctx.ops
+    predicted = int(ctx.batch.predicted_defect.sum())
+    return {"ASSUMPTION": "unit costs are planning assumptions; replace with company figures",
+            "cost_per_defect_usd": o["cost_per_defect_usd"], "inspection_cost_usd": o["inspection_cost_usd"],
+            "calibration_cost_usd": o["calibration_cost_usd"], "aog_event_cost_usd": o["aog_event_cost_usd"],
+            "predicted_defects_in_batch": predicted,
+            "predicted_defect_cost_at_risk_usd": predicted * o["cost_per_defect_usd"]}
 
 
 # --------------------------------------------------------------------------- registry
@@ -197,28 +212,32 @@ def _schema(props: dict | None = None) -> dict:
     return {"type": "object", "properties": props, "required": list(props), "additionalProperties": False}
 
 
+_IDS = {"aircraft_ids": {"type": "array", "items": {"type": "string"}, "description": "e.g. [\"B787-022\"]"}}
+
 TOOLS = {
-    "fleet_overview": (fleet_overview, "Fleet headline numbers: aircraft per status, test period, predicted "
-                       "defects, base rates, Yes threshold and the tool most linked to current risk.", _schema()),
-    "list_aircraft": (list_aircraft, "Aircraft ranked by belt status and defect risk (latest screening), with "
-                      "reasons.", _schema({"status": {"type": "string", "enum": STATUSES},
-                                           "limit": {"type": "integer", "description": "1-25"}})),
-    "aircraft_history": (aircraft_history, "All test-period screenings of one aircraft (risk over time, tool, "
-                         "measurements).", _schema({"aircraft_id": {"type": "string",
-                                                                    "description": "e.g. B787-022"}})),
-    "tool_status": (tool_status, "Every tension tool: calibration age, uses, tension error, historical and "
-                    "predicted defect rates.", _schema()),
-    "tool_history": (tool_history, "One tool month by month: days since calibration, tension error, defect "
-                     "rate.", _schema({"tool_id": {"type": "string", "description": "e.g. Tool-03"}})),
-    "measurement_signals": (measurement_signals, "Normal ranges, how much each abnormal measurement raises "
-                            "defect odds, abnormal counts in the test period, and screenings where measurements "
-                            "look abnormal but the model says low risk.", _schema()),
-    "defect_rate_by_factor": (defect_rate_by_factor, "Actual training defect rate by a factor.",
-                              _schema({"factor": {"type": "string", "enum": FACTORS}})),
-    "monthly_trend": (monthly_trend, "Monthly defect rate (actual then predicted), temperature and overdue-tool "
-                      "share.", _schema()),
-    "seasonal_comparison": (seasonal_comparison, "Defect rate in the same months a year apart.", _schema()),
-    "model_card": (model_card, "How good the prediction model is, how it was tested, and its limits.", _schema()),
+    "batch_risk_summary": (batch_risk_summary, "Model results for this batch: screenings, predicted defects, aircraft "
+                           "per risk status, threshold, tool most linked to risk.", _schema()),
+    "list_aircraft": (list_aircraft, "Aircraft in this batch ranked by belt status and model risk, with reasons.",
+                      _schema({"status": {"type": "string", "enum": STATUSES},
+                               "limit": {"type": "integer", "description": "1-25"}})),
+    "aircraft_history": (aircraft_history, "Recent screenings of one aircraft (risk, tool, station, measurements).",
+                         _schema({"aircraft_id": {"type": "string", "description": "e.g. B787-022"}})),
+    "tools_at_risk": (tools_at_risk, "Every tension tool: calibration age, uses, load, tension error, predicted "
+                      "defect rate.", _schema()),
+    "measurement_signals": (measurement_signals, "Normal ranges, how much abnormal readings raise defect odds, "
+                            "abnormal counts in the batch, and abnormal-but-low-risk screenings.", _schema()),
+    "aircraft_locations": (aircraft_locations, "Station and engine for each aircraft (latest screening).",
+                           _schema(_IDS)),
+    "logistics_context": (logistics_context, "Belt stock per station, order lead time, calibration lab slots, "
+                          "technicians per shift, loan tools (assumptions).", _schema()),
+    "plan_parts_and_staff": (plan_parts_and_staff, "Calculator: belts needed vs stock per station and technician "
+                             "hours vs one shift, for the aircraft to inspect.", _schema(_IDS)),
+    "cost_of_plan": (cost_of_plan, "Calculator: cost of N inspections and M calibrations vs the predicted defect cost "
+                     "at risk.", _schema({"inspections": {"type": "integer"}, "calibrations": {"type": "integer"}})),
+    "flight_exposure": (flight_exposure, "Estimated flights in the next 24 hours for each aircraft (assumption).",
+                        _schema(_IDS)),
+    "cost_context": (cost_context, "Unit costs (assumptions) and predicted defect cost at risk for this batch.",
+                     _schema()),
 }
 
 
@@ -227,15 +246,15 @@ def openai_tool_specs(names: list) -> list:
             for n in names]
 
 
-def call_tool(data: fa.FleetData, name: str, args: dict, allowed: list) -> dict:
+def call_tool(ctx: ToolContext, name: str, args: dict, allowed: list) -> dict:
     """Run one tool. Refuses tools outside the agent's allowlist; output is always sanitised."""
     if name not in allowed or name not in TOOLS:
         return {"error": f"tool '{name}' is not available to this agent"}
     try:
-        result = TOOLS[name][0](data, **(args or {}))
+        result = TOOLS[name][0](ctx, **(args or {}))
     except TypeError as err:
         result = {"error": f"bad arguments: {err}"}
-    except Exception as err:                          # never crash the team on one tool
+    except Exception as err:
         result = {"error": f"tool failed: {type(err).__name__}"}
     return sanitize(_jsonable(result))
 
@@ -245,9 +264,9 @@ def _jsonable(obj):
         return {k: _jsonable(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_jsonable(v) for v in obj]
-    if isinstance(obj, (np.integer,)):
+    if isinstance(obj, np.integer):
         return int(obj)
-    if isinstance(obj, (np.floating,)):
+    if isinstance(obj, np.floating):
         return None if np.isnan(obj) else float(obj)
     if isinstance(obj, np.bool_):
         return bool(obj)

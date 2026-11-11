@@ -154,42 +154,49 @@ The value overlaps with Fix 1 (most bad tension comes from bad tools), so we don
 
 The ML model produces risk scores, and the data holds the evidence. Findings like these are only valuable if someone acts on them **every day**. That is the agents' job: they turn model output into decisions, owners and follow-up, around the clock and across every base.
 
-### From model output to business action
+### The workflow: from model output to approved work orders
 
-The agent team is live in the dashboard: click **✨ AI**, then **▶ Run briefing**.
+The workflow is live in the dashboard's **🔀 Workflow** page: an animated diagram with a timestamped log.
 
-| Business fix | Agent that drives it | What it does with the model's results | Who acts |
+```
+Incoming data → Security agent → ML model → Orchestrator → Quality & Safety → Logistics → Commercial
+             → Security check → Human approval → Outputs (work orders, PDF, email)
+```
+
+| Business fix | Workflow step | What it does with the model's results | Who acts |
 |---|---|---|---|
-| **1. Condition-based calibration** | **Tool & calibration analyst** | Watches every tool's calibration age, uses and tension drift; flags overdue or drifting tools before they become a problem, with evidence (days, uses, tension error) | Tool crib / calibration |
-| **2. First-time-right tension** | **Measurement analyst** | Finds belts outside the normal range, including cases where readings are bad but the model says low risk, so nothing slips through | Line maintenance |
-| **3. Risk-based inspection** | **Risk analyst** | Ranks aircraft by model risk, explains each one in plain words, and builds the inspection list | Maintenance planning |
-| **4. Season-ready planning** | **Trend analyst** | Compares this year with last year and spots the coming defect wave | Planning / stores |
-| **All of the above** | **Lead planner** | Merges all findings, resolves conflicts, and issues **one ranked plan**: action, aircraft or tool IDs, owner, urgency (Today / This week / This month), and evidence | Maintenance manager |
-| Ad-hoc questions | **Router + specialists** | "Why is B787-022 high risk?" "Which tool first?" Answered in seconds with checked numbers | Anyone |
+| **Data you can trust** | **Security agent** (rules) | Validates every incoming screening; quarantines bad IDs, impossible values, duplicates and instruction-like text | Reliability engineering |
+| **1. Condition-based calibration** and **3. Risk-based inspection** | **Quality & Safety agent** | Turns risk scores into inspections with priority (P1 today, P2 48h, P3 next check) and tool actions (e.g. remove Tool-03 and calibrate) | Line maintenance, tool crib |
+| **2. First-time-right tension** and **4. Season-ready planning** | **Logistics agent** | Belts per station (stock vs order), calibration slot and loan tool for each tool, technician capacity per shift | Stores, tool crib, planning |
+| **Money and customers** | **Commercial agent** | Flights at risk in the next 24h, plan cost vs predicted defect cost at risk, customer note, recommendation | Operations, management |
+| **No made-up numbers** | **Security check** | Verifies every number the agents wrote against the model, data and calculators | Automatic |
+| **Accountability** | **Human approval** | Manager approves or rejects; name, time and comment logged; only then are work orders issued | Maintenance manager |
 
-**Getting findings to the people who act:** every specialist report has a **📤 Share** button. It emails the report (opening your own email app, with a suggested recipient such as the tool crib for the tool report), downloads a formatted **PDF**, or downloads plain text, so each finding reaches its owner in one click.
+**Example (real run, latest month):** 622 screenings → 48 predicted defects, 9 High Risk aircraft → 19 inspections and 2 tool pulls (Tool-03, Tool-05) → 10 belts to order, calibration slots today at 14:00 and 16:00 → about 49 flights at risk, plan cost $6,000 vs $240,000 predicted defect cost at risk → 3/3 agents verified → approved → 21 work orders. Cost about $0.015.
+
+**Assumptions are labelled:** belt stock, calibration slots, technician numbers, flight estimates and unit costs are planning assumptions (the dataset doesn't hold them); in production they come from the stores, scheduling and finance systems.
 
 ### Why agents instead of just a dashboard
 
 | Without agents | With agents |
 |---|---|
-| An engineer has to open 6 tabs, read the charts and connect the dots | A **ranked action plan** arrives in a minute |
+| An engineer reads the charts and connects the dots | An **approved plan with work orders** arrives in minutes |
 | Findings depend on who looks and when | **The same checks every time**, every day |
 | Tool drift is noticed after defects appear | Drift is flagged **before** the defect wave |
 | Insights stay in reliability engineering | Each action has an **owner** and an **urgency** |
 | Questions wait for an analyst | **Instant answers** with evidence |
 
 ### What it costs and why it's safe
-- **Unit cost (measured on our 100-aircraft fleet):** about $0.03–0.05 per full team briefing, about $0.001 per question. Section 6 scales this to the whole enterprise.
+- **Unit cost (measured on our 100-aircraft fleet):** about $0.015–0.02 per full workflow run. Section 6 scales this to the whole enterprise.
 - **The facts come from the model and data, not the AI:** every number the agents write is checked against the model's output.
 - **Read-only and human-approved:** agents recommend; engineers decide. Every run is logged for audit, which matters in a regulated industry.
 
 ### Next step: from advisor to co-pilot
 | Stage | What the agents do | Status |
 |---|---|---|
-| 1. **Advisor** | Team briefing and Q&A in the AI panel, reports shared by email or PDF | **Built (live today)** |
+| 1. **Workflow with human gate** | Security, model and three business agents produce a verified plan; a manager approves; work orders, PDF and email are generated | **Built (live today)** |
 | 2. **Watchdog** | Run automatically on every new screening; alert the tool crib when a tool crosses load 60 | Next: a scheduled run plus an email or Teams alert |
-| 3. **Co-pilot** | Draft work orders in the maintenance system (for example, "calibrate Tool-03", "inspect B787-022 ENG-L") **for an engineer to approve** | Later: needs maintenance-system integration and approval workflow |
+| 3. **Integrated** | Push approved work orders straight into the maintenance system (AMOS / TRAX / SAP) and read real stock, slots and flight schedules | Later: needs maintenance-system integration |
 | 4. **Learning loop** | Compare predictions with actual inspection results each month; retrain the model when performance drops | Later: needs inspection outcomes fed back |
 
 ---
