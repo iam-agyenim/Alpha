@@ -1,22 +1,24 @@
 """Read-only tools the agents can call.
 
-Every tool reads the trained model's saved predictions and the training data through fleet_analysis,
+Every tool reads the trained model's saved predictions and the training data (and, for business tools, the
+user's cost assumptions),
 returns a small JSON-ready summary (never raw rows in bulk), and passes through guard.sanitize.
 No tool can write, delete, run code or reach the internet.
 Percentages are returned as percent numbers (6.6 means 6.6%).
 """
 import re
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
 from .. import config
 from .. import fleet_analysis as fa
+from . import business as B
 from .guard import sanitize
 
 AIRCRAFT_RE = re.compile(r"^B787-\d{3}$")
 TOOL_RE = re.compile(r"^Tool-\d{2}$")
-FACTORS = ["tension_band", "calibration_band", "tool", "station", "supplier"]
 STATUSES = [fa.STATUS_HIGH, fa.STATUS_MEDIUM, fa.STATUS_NORMAL, "any"]
 
 
@@ -84,22 +86,6 @@ def aircraft_history(data: fa.FleetData, aircraft_id: str) -> dict:
             "predicted_defects": int(rows.predicted_defect.sum()), "latest_screenings": out}
 
 
-def tool_status(data: fa.FleetData) -> dict:
-    t = fa.tool_summary(data)
-    return {"overdue_rule": f"calibration load (days x uses / 1000) above {fa.OVERDUE_CALIBRATION_LOAD}",
-            "latest_month": f"{data.test.month.max():%Y-%m}",
-            "tools": [{
-                "tool": r.Tool_ID, "training_defect_rate_pct": _pct(r.training_defect_rate),
-                "test_predicted_defect_rate_pct": _pct(r.predicted_defect_rate),
-                "latest_month_predicted_defect_rate_pct": _pct(r.latest_predicted_rate),
-                "days_since_calibration": _num(r.days_since_calibration, 0),
-                "uses_since_calibration": _num(r.uses_since_calibration, 0),
-                "latest_avg_tension_difference_pct": _num(r.latest_tension_error),
-                "test_overdue_share_pct": _pct(r.current_overdue_share, 0),
-                "test_screenings": int(r.screenings),
-            } for r in t.itertuples()]}
-
-
 def tool_history(data: fa.FleetData, tool_id: str) -> dict:
     if not TOOL_RE.match(tool_id or ""):
         return {"error": "tool_id must look like Tool-03"}
@@ -113,44 +99,6 @@ def tool_history(data: fa.FleetData, tool_id: str) -> dict:
     } for r in drift.itertuples()]}
 
 
-def measurement_signals(data: fa.FleetData) -> dict:
-    lift = fa.abnormal_measurement_lift(data.train)
-    limits = {fa.MEASUREMENTS[c][0]: _num(v) for c, v in data.normal_limits.items()}
-    test = data.test
-    abnormal_counts = {fa.MEASUREMENTS[c][0]: int(test[f"abnormal_{c}"].sum()) for c in fa.MEASUREMENTS}
-    # Peer check: measurement says risky, model says low risk
-    disagree = test[test.abnormal_any & (test.defect_probability < fa.MEDIUM_RISK_PROBABILITY)]
-    examples = [{
-        "record": r[config.ID_COLUMN], "aircraft": r.Aircraft_ID, "date": f"{r[config.DATE_COLUMN]:%Y-%m-%d}",
-        "defect_risk_pct": _pct(r.defect_probability), "reasons": fa.screening_reasons(r, data.normal_limits)[:160],
-    } for _, r in disagree.sort_values(config.DATE_COLUMN).tail(8).iterrows()]
-    return {
-        "normal_range_upper_limits": limits,
-        "normal_range_rule": "99% of defect-free training screenings were inside these limits",
-        "training_lift": [{"measurement": r.measurement, "defect_rate_if_abnormal_pct": _pct(r.rate_abnormal),
-                           "defect_rate_if_normal_pct": _pct(r.rate_normal),
-                           "times_more_likely": _num(r.times_more_likely)} for r in lift.itertuples()],
-        "test_abnormal_screenings": abnormal_counts,
-        "abnormal_but_model_low_risk": {"count": int(len(disagree)), "latest_examples": examples},
-    }
-
-
-def defect_rate_by_factor(data: fa.FleetData, factor: str) -> dict:
-    train = data.train
-    if factor == "tension_band":
-        t, col = fa.defect_rate_by_tension_band(train), "tension_band"
-    elif factor == "calibration_band":
-        t, col = fa.defect_rate_by_calibration(train), "calibration_band"
-    elif factor in ("tool", "station", "supplier"):
-        col = {"tool": "Tool_ID", "station": "Maintenance_Station", "supplier": "Belt_Supplier"}[factor]
-        t = fa.defect_rate_by(train, col)
-    else:
-        return {"error": f"factor must be one of {FACTORS}"}
-    return {"factor": factor, "source": "training data, actual outcomes",
-            "groups": [{"group": str(r[col]), "defect_rate_pct": _pct(r.defect_rate),
-                        "screenings": int(r.screenings)} for _, r in t.iterrows()]}
-
-
 def monthly_trend(data: fa.FleetData) -> dict:
     t = fa.monthly_defect_trend(data)
     return {"note": "Actual = confirmed outcomes; Predicted = model predictions for the test period",
@@ -158,24 +106,6 @@ def monthly_trend(data: fa.FleetData) -> dict:
                         "screenings": int(r.screenings), "avg_ambient_temp_c": _num(r.ambient_temp),
                         "overdue_tool_share_pct": _pct(r.overdue_share, 0),
                         "avg_abs_tension_difference_pct": _num(r.tension_error)} for r in t.itertuples()]}
-
-
-def seasonal_comparison(data: fa.FleetData) -> dict:
-    """Same calendar months a year apart (actual for training months, predicted for test months)."""
-    t = fa.monthly_defect_trend(data)
-    t = t.assign(year=t.month.dt.year, cal_month=t.month.dt.month)
-    t = t.sort_values("source").drop_duplicates(["year", "cal_month"])   # prefer Actual where both exist
-    pivot = t.pivot(index="cal_month", columns="year", values="defect_rate")
-    rows = []
-    for m, r in pivot.iterrows():
-        vals = {str(y): _pct(v) for y, v in r.items() if not pd.isna(v)}
-        if len(vals) >= 2:
-            rows.append({"calendar_month": int(m), **{f"defect_rate_{y}_pct": v for y, v in vals.items()}})
-    tr = data.train
-    spring_rows = tr[tr.month.dt.month.isin([4, 5])]
-    spring = spring_rows.groupby(spring_rows.month.dt.year)[config.LABEL_COLUMN].mean()   # actual, all screenings
-    return {"same_month_comparison": rows,
-            "apr_may_defect_rate_pct_by_year": {str(y): _pct(v) for y, v in spring.items()}}
 
 
 def model_card(data: fa.FleetData) -> dict:
@@ -192,33 +122,66 @@ def model_card(data: fa.FleetData) -> dict:
 
 
 # --------------------------------------------------------------------------- registry
+@dataclass
+class ToolContext:
+    """What a tool can see: the fleet data (model predictions + training data) and the business assumptions."""
+    data: fa.FleetData
+    assumptions: B.Assumptions
+
+
 def _schema(props: dict | None = None) -> dict:
     props = props or {}
     return {"type": "object", "properties": props, "required": list(props), "additionalProperties": False}
 
 
+def _d(fn):            # tool that needs only the data
+    return lambda ctx, **kw: fn(ctx.data, **kw)
+
+
+def _da(fn):           # tool that needs data + business assumptions
+    return lambda ctx, **kw: fn(ctx.data, ctx.assumptions, **kw)
+
+
 TOOLS = {
-    "fleet_overview": (fleet_overview, "Fleet headline numbers: aircraft per status, test period, predicted "
-                       "defects, base rates, Yes threshold and the tool most linked to current risk.", _schema()),
-    "list_aircraft": (list_aircraft, "Aircraft ranked by belt status and defect risk (latest screening), with "
-                      "reasons.", _schema({"status": {"type": "string", "enum": STATUSES},
-                                           "limit": {"type": "integer", "description": "1-25"}})),
-    "aircraft_history": (aircraft_history, "All test-period screenings of one aircraft (risk over time, tool, "
-                         "measurements).", _schema({"aircraft_id": {"type": "string",
-                                                                    "description": "e.g. B787-022"}})),
-    "tool_status": (tool_status, "Every tension tool: calibration age, uses, tension error, historical and "
-                    "predicted defect rates.", _schema()),
-    "tool_history": (tool_history, "One tool month by month: days since calibration, tension error, defect "
-                     "rate.", _schema({"tool_id": {"type": "string", "description": "e.g. Tool-03"}})),
-    "measurement_signals": (measurement_signals, "Normal ranges, how much each abnormal measurement raises "
-                            "defect odds, abnormal counts in the test period, and screenings where measurements "
-                            "look abnormal but the model says low risk.", _schema()),
-    "defect_rate_by_factor": (defect_rate_by_factor, "Actual training defect rate by a factor.",
-                              _schema({"factor": {"type": "string", "enum": FACTORS}})),
-    "monthly_trend": (monthly_trend, "Monthly defect rate (actual then predicted), temperature and overdue-tool "
+    # --- evidence: what the model and data say ---
+    "problem_register": (_d(B.problem_register), "The measured business problems behind belt defects, each with "
+                         "its share of defects (calibration lapses, wrong tension, heat, no early warning).", _schema()),
+    "tension_calibration_matrix": (_d(B.tension_calibration_matrix), "Defect rate and share of defects for overdue "
+                                   "vs calibrated tools crossed with tension more/less than 6% off target.", _schema()),
+    "supplier_tool_interaction": (_d(B.supplier_tool_interaction), "Defect rate per belt supplier with and without "
+                                  "an overdue tool (is the supplier the problem, or the tool?).", _schema()),
+    "tools_at_risk_now": (_d(B.tools_at_risk_now), "Every tool's calibration load now, tension error and the model's "
+                          "predicted defect rate for its latest jobs.", _schema()),
+    "tool_history": (_d(tool_history), "One tool month by month: days since calibration, tension error, defect rate.",
+                     _schema({"tool_id": {"type": "string", "description": "e.g. Tool-03"}})),
+    "fleet_overview": (_d(fleet_overview), "Fleet headline: aircraft per risk status now, predicted defects, base "
+                       "rates, threshold.", _schema()),
+    "list_aircraft": (_d(list_aircraft), "Aircraft ranked by belt status and model risk, with reasons.",
+                      _schema({"status": {"type": "string", "enum": STATUSES},
+                               "limit": {"type": "integer", "description": "1-25"}})),
+    "aircraft_history": (_d(aircraft_history), "All recent screenings of one aircraft (risk over time, tool, "
+                         "measurements).", _schema({"aircraft_id": {"type": "string", "description": "e.g. B787-022"}})),
+    "monthly_trend": (_d(monthly_trend), "Monthly defect rate (actual then predicted), temperature and overdue-tool "
                       "share.", _schema()),
-    "seasonal_comparison": (seasonal_comparison, "Defect rate in the same months a year apart.", _schema()),
-    "model_card": (model_card, "How good the prediction model is, how it was tested, and its limits.", _schema()),
+    "model_card": (_d(model_card), "How accurate the ML model is, how it was tested, and its limits.", _schema()),
+    # --- business calculators (use the assumptions: fleet size, unit costs, policy settings) ---
+    "calibration_policy_options": (_da(B.calibration_policy_options), "For calibration-load triggers 30/45/60/90: "
+                                   "defects avoided, extra calibrations, value, cost and net value per year for the "
+                                   "planned fleet.", _schema()),
+    "tension_check_policy": (_da(B.tension_check_policy), "For re-tension triggers (4/6/8% off target): share of "
+                             "defects covered, re-tensions and cost per year.", _schema()),
+    "inspection_capture_curve": (_da(B.inspection_capture_curve), "Inspect the model's top X% riskiest screenings: "
+                                 "defects caught, inspections, yield and cost per year, vs blanket inspection.",
+                                 _schema()),
+    "season_plan": (_da(B.season_plan), "Hot-season effect, year-on-year spring change and predicted monthly belt "
+                    "replacements for the planned fleet.", _schema()),
+    "enterprise_cost": (_da(B.enterprise_cost), "Cost of running this AI system at the planned scale: AI tokens and "
+                        "total cost of ownership.", _schema()),
+    "business_value": (_da(B.business_value), "Value, costs, net benefit, return and payback for a policy choice. "
+                       "Pass the calibration trigger, re-tension trigger and inspection share you want to price.",
+                       _schema({"calibration_limit": {"type": "number", "enum": B.CALIBRATION_LIMITS},
+                                "tension_limit_pct": {"type": "number", "enum": B.TENSION_LIMITS},
+                                "inspection_top_pct": {"type": "number", "enum": B.INSPECTION_TOP_PCTS}})),
 }
 
 
@@ -227,12 +190,12 @@ def openai_tool_specs(names: list) -> list:
             for n in names]
 
 
-def call_tool(data: fa.FleetData, name: str, args: dict, allowed: list) -> dict:
+def call_tool(ctx: ToolContext, name: str, args: dict, allowed: list) -> dict:
     """Run one tool. Refuses tools outside the agent's allowlist; output is always sanitised."""
     if name not in allowed or name not in TOOLS:
         return {"error": f"tool '{name}' is not available to this agent"}
     try:
-        result = TOOLS[name][0](data, **(args or {}))
+        result = TOOLS[name][0](ctx, **(args or {}))
     except TypeError as err:
         result = {"error": f"bad arguments: {err}"}
     except Exception as err:                          # never crash the team on one tool

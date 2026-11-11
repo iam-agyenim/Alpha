@@ -79,22 +79,24 @@ Test prediction: 106 of 2,000 rows flagged (5.3%, vs 2.7% in training). The test
 covers the hot-season peak and a build-up of overdue tool calibrations, both strong defect drivers;
 see `scripts/check_test_distribution_shift.py`.
 
-## AI agent team (multi-agent layer)
+## AI business team (multi-agent layer)
 
-`belt_defect/agents/` adds a team of OpenAI agents on top of the trained model (dashboard tab **AI agents**):
-four specialists (risk, measurements, tools & calibration, trends) run in parallel with read-only tools that
-return the model's predictions and training-data statistics; a lead planner merges their findings into one
-prioritised action plan. A router answers chat questions with the right specialist.
+`belt_defect/agents/` adds a team of OpenAI agents that turns the ML model's results into a business case
+(dashboard tab **AI agents**): a Reliability engineer, a Calibration & tooling engineer, a Maintenance planner and a
+Finance analyst work in parallel with read-only tools; peer cross-checks compare their numbers; the Head of
+Reliability writes one executive business plan (problems, ranked decisions with $ value/cost, owner, timing and
+KPI, financials, 30/60/90-day roadmap). A router answers business questions with the right specialist.
 
 | File | Role |
 |---|---|
-| `agents/tools.py` | 10 read-only tools (model output + statistics), sanitised JSON |
-| `agents/agent.py` | capped tool-calling loop (OpenAI Responses API), number grounding check |
-| `agents/team.py` | specialists, peer cross-checks, lead planner, chat router, audit log |
-| `agents/guard.py` | prompt-injection screening, output allowlist, grounding |
-| `agents/cost.py`, `agents/settings.py` | token/cost meter, prices, models, spend limits |
-| `dashboard/agents_tab.py` | Streamlit UI |
+| `agents/business.py` | Business calculators: problem register, calibration/tension/inspection policies, season plan, enterprise cost, value/ROI/payback (editable `Assumptions`) |
+| `agents/tools.py` | 16 read-only tools (model output, statistics, calculators), sanitised JSON |
+| `agents/agent.py` | Capped tool-calling loop (OpenAI Responses API), number grounding check |
+| `agents/team.py` | Specialists, peer cross-checks, Head of Reliability, chat router, audit log |
+| `agents/guard.py` | Prompt-injection screening, output allowlist, grounding |
+| `agents/cost.py`, `agents/settings.py` | Token/cost meter, prices, models, spend limits |
+| `dashboard/agents_tab.py` | Streamlit UI (assumptions panel, plan, chat, downloads) |
 
 **API key:** put `OPENAI_API_KEY=...` in `.env` (git-ignored) locally, or in Streamlit Cloud **Settings → Secrets**.
-Measured cost: about $0.03 per full briefing, about $0.0007 per chat question. Tests: `.venv/bin/python -m pytest tests`.
-See `PRESENTATION_GUIDE.md` sections 12–15 for architecture, security and the business case.
+Measured cost: about $0.04–0.05 per business plan, about $0.001 per question. Tests: `.venv/bin/python -m pytest tests`.
+See `BUSINESS_CASE.md` and `PRESENTATION_GUIDE.md` sections 12–15.
