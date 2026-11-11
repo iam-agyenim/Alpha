@@ -43,9 +43,9 @@ class Agent:
     max_output_tokens: int = MAX_OUTPUT_TOKENS
 
     def instructions(self) -> str:
-        return f"You are the {self.name} in the reliability engineering team of a large aerospace business. The team uses an ML model of B787 belt defects to cut cost and run maintenance more efficiently.\n{self.role}\n\n{SECURITY_RULES}"
+        return f"You are the {self.name} on an aircraft belt-health analysis team.\n{self.role}\n\n{SECURITY_RULES}"
 
-    def run(self, client, ctx, task: str, meter: CostMeter, output_schema: dict | None = None,
+    def run(self, client, data, task: str, meter: CostMeter, output_schema: dict | None = None,
             context: str = "", evidence: list | None = None) -> AgentResult:
         """evidence = tool results handed over in `context` (lead agent); numbers from it count as grounded."""
         start, tool_log = time.time(), []
@@ -77,7 +77,7 @@ class Agent:
                         args = json.loads(c.arguments or "{}")
                     except json.JSONDecodeError:
                         args = {}
-                    result = call_tool(ctx, c.name, args, self.tools)
+                    result = call_tool(data, c.name, args, self.tools)
                     tool_log.append({"tool": c.name, "args": args, "result": result})
                     conversation.append({"type": "function_call_output", "call_id": c.call_id,
                                          "output": json.dumps(result)})

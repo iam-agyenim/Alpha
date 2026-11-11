@@ -87,7 +87,7 @@ Each of these signals existed in the data before the defects rose, but nobody wa
 | Extra calibrations (about 40 a year at $150) | about $6,000 |
 | **Net benefit** | **about $379,000** |
 
-**Tighter option, load 45:** at 1,000 aircraft it avoids about 25 more defects a year (about $90k more net) but needs about 6× more calibrations (about 278 against 44 extra a year). Start at 60, and pilot 45 where calibration capacity allows. The AI business team weighs this trade-off itself.
+**Tighter option, load 45:** at 1,000 aircraft it avoids about 25 more defects a year (about $90k more net) but needs about 6× more calibrations (about 278 against 44 extra a year). Start at 60, and pilot 45 where calibration capacity allows.
 
 **KPI:** % of screenings done with a tool above the trigger. **Target: 0%.**
 
@@ -154,21 +154,20 @@ The value overlaps with Fix 1 (most bad tension comes from bad tools), so we don
 
 The ML model produces risk scores, and the data holds the evidence. Findings like these are only valuable if someone acts on them **every day**. That is the agents' job: they turn model output into decisions, owners and follow-up, around the clock and across every base.
 
-### The AI business team (live in the dashboard's "AI agents" tab)
+### From model output to business action
 
-| Agent | Business job | What it uses | Output |
+The agent team is live in the dashboard: click **✨ AI**, then **▶ Run briefing**.
+
+| Business fix | Agent that drives it | What it does with the model's results | Who acts |
 |---|---|---|---|
-| **Reliability engineer** | Finds the problems and root causes (Problems 1, 2, 5) | Problem register, tension × calibration matrix, supplier × tool, trend, model card | The problem list with each problem's share of defects |
-| **Calibration & tooling engineer** | Fixes 1, 2, 6: best calibration trigger, tools to pull now, re-tension check | Calibration policy options (30/45/60/90), tension policy, tools at risk now | Policy choice with defects avoided, extra calibrations, $ value |
-| **Maintenance planner** | Fixes 3, 4: how much to inspect, which aircraft first, seasonal staff and spares | Inspection capture curve, season plan, aircraft lists | Inspection share and list, season plan |
-| **Finance analyst** | Value, cost, net benefit, return, payback, system cost at scale | Business value calculator (re-prices any policy), enterprise cost model | Financials for management |
-| **Head of Reliability** (lead) | Merges everything into **one executive business plan** | All tools, to verify and re-price | Problems, ranked decisions (owner, timing, $ value/cost, KPI), financials, 30/60/90 roadmap, risks, one-slide summary |
+| **1. Condition-based calibration** | **Tool & calibration analyst** | Watches every tool's calibration age, uses and tension drift; flags overdue or drifting tools before they become a problem, with evidence (days, uses, tension error) | Tool crib / calibration |
+| **2. First-time-right tension** | **Measurement analyst** | Finds belts outside the normal range, including cases where readings are bad but the model says low risk, so nothing slips through | Line maintenance |
+| **3. Risk-based inspection** | **Risk analyst** | Ranks aircraft by model risk, explains each one in plain words, and builds the inspection list | Maintenance planning |
+| **4. Season-ready planning** | **Trend analyst** | Compares this year with last year and spots the coming defect wave | Planning / stores |
+| **All of the above** | **Lead planner** | Merges all findings, resolves conflicts, and issues **one ranked plan**: action, aircraft or tool IDs, owner, urgency (Today / This week / This month), and evidence | Maintenance manager |
+| Ad-hoc questions | **Router + specialists** | "Why is B787-022 high risk?" "Which tool first?" Answered in seconds with checked numbers | Anyone |
 
-**Inputs the user controls:** fleet size, bases, users, unit costs, calibration trigger, re-tension threshold and inspection share. The agents re-price the plan for any company.
-
-**Facts vs judgement:** the ML model provides the risk, code calculates every dollar, and the agents decide and explain. Every number they write is checked against those sources.
-
-**Example (real run, 1,000 aircraft, default costs):** the team chose a **calibration trigger of 45** over 60. It is worth about $90k a year more net, but needs about 6× more calibrations, so they recommended a pilot. Re-priced net benefit: **about $688k–$1.34M a year after all system and programme costs**, payback on integration **0.7–2.3 months**.
+**Getting findings to the people who act:** every specialist report has a **📤 Share** button. It emails the report (opening your own email app, with a suggested recipient such as the tool crib for the tool report), downloads a formatted **PDF**, or downloads plain text, so each finding reaches its owner in one click.
 
 ### Why agents instead of just a dashboard
 
@@ -181,14 +180,14 @@ The ML model produces risk scores, and the data holds the evidence. Findings lik
 | Questions wait for an analyst | **Instant answers** with evidence |
 
 ### What it costs and why it's safe
-- **Unit cost (measured on our 100-aircraft fleet):** about $0.04–0.05 per full business plan, about $0.001 per question. Section 6 scales this to the whole enterprise.
+- **Unit cost (measured on our 100-aircraft fleet):** about $0.03–0.05 per full team briefing, about $0.001 per question. Section 6 scales this to the whole enterprise.
 - **The facts come from the model and data, not the AI:** every number the agents write is checked against the model's output.
 - **Read-only and human-approved:** agents recommend; engineers decide. Every run is logged for audit, which matters in a regulated industry.
 
 ### Next step: from advisor to co-pilot
 | Stage | What the agents do | Status |
 |---|---|---|
-| 1. **Advisor** | Executive business plan on demand (re-priced for any assumptions), inspection list, business Q&A | **Built (live today)** |
+| 1. **Advisor** | Team briefing and Q&A in the AI panel, reports shared by email or PDF | **Built (live today)** |
 | 2. **Watchdog** | Run automatically on every new screening; alert the tool crib when a tool crosses load 60 | Next: a scheduled run plus an email or Teams alert |
 | 3. **Co-pilot** | Draft work orders in the maintenance system (for example, "calibrate Tool-03", "inspect B787-022 ENG-L") **for an engineer to approve** | Later: needs maintenance-system integration and approval workflow |
 | 4. **Learning loop** | Compare predictions with actual inspection results each month; retrain the model when performance drops | Later: needs inspection outcomes fed back |
@@ -220,7 +219,7 @@ Our measured unit costs come from one 100-aircraft fleet. A large aerospace busi
 | **Total per month** | | **about $1,000** | **about $9,700** |
 | **Per year, with 50% headroom for growth and retries** | | **about $17,000** | **about $175,000** |
 
-**Which tier?** Standard is enough for daily operations. Premium buys better reasoning for the Head of Reliability and complex questions, and is worth it where a wrong call is expensive (fleet-level decisions, regulator reports).
+**Which tier?** Standard is enough for daily operations. Premium buys better reasoning for the lead planner and complex questions, and is worth it where a wrong call is expensive (fleet-level decisions, regulator reports).
 
 ### Total cost of ownership (what a big business actually pays)
 

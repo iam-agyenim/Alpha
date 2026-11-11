@@ -51,8 +51,10 @@ If you only remember one sentence: *"Overdue tool → wrong belt tension → mor
 
 ---
 
-## 3. The left sidebar: Settings
+## 3. The left sidebar: pages and settings
 
+- **Pages:** the menu at the top of the sidebar switches between the six pages: 🚨 Fleet alert, 📈 Trends, 🔍 Factors, 🔧 Tools & calibration, 📋 Inspection list and 🧠 Model. The current page is highlighted.
+- **✨ AI (top right of every page):** opens the AI assistant panel on the right (see section 12).
 - **Aircraft status based on:** controls which screening decides each aircraft's colour.
   - **Latest screening** (default): the aircraft's most recent check. Answers "how is it *now*?"
   - **Riskiest screening, last 30 days:** the worst check in the last month. This is a more cautious view, so more aircraft show as risky.
@@ -62,7 +64,7 @@ If you only remember one sentence: *"Overdue tool → wrong belt tension → mor
 
 ---
 
-## 4. Tab 1: Fleet alert (the main page)
+## 4. Page 1: Fleet alert (the main page)
 
 This is the page for a maintenance manager: what is wrong, and what to do today.
 
@@ -100,7 +102,7 @@ One row per aircraft, worst first. By default it shows only the flagged aircraft
 
 ---
 
-## 5. Tab 2: Trends
+## 5. Page 2: Trends
 
 This tab answers: is the problem getting better or worse, and when does it happen?
 
@@ -132,7 +134,7 @@ This tab answers: is the problem getting better or worse, and when does it happe
 
 ---
 
-## 6. Tab 3: Factors
+## 6. Page 3: Factors
 
 This tab uses **training data only** (real outcomes). It answers: what is different about screenings that found a defect?
 
@@ -176,7 +178,7 @@ For each measurement, two bars: defect rate when the reading was **outside** the
 
 ---
 
-## 7. Tab 4: Tools & calibration
+## 7. Page 4: Tools & calibration
 
 This tab answers: which tool is the problem right now, and how do we know calibration matters?
 
@@ -226,7 +228,7 @@ The same thing happened three times: **Tool-05 in late 2024, Tool-01 in spring 2
 
 ---
 
-## 8. Tab 5: Inspection list
+## 8. Page 5: Inspection list
 
 This tab is the working list for engineers.
 
@@ -238,7 +240,7 @@ This tab is the working list for engineers.
 - **Columns:** Record ID, aircraft, engine, date, status, defect risk (shown as a bar), tension difference, tool, station, and why it was flagged.
 - **Download inspection list (CSV)** exports the filtered list for planning or hand-over.
 
-Note the difference from Tab 1: Tab 1 shows **one row per aircraft** (its current state). This tab shows **every risky screening** in the period, so one aircraft can appear more than once (B787-048 appears twice).
+Note the difference from Page 1: Page 1 shows **one row per aircraft** (its current state). This page shows **every risky screening** in the period, so one aircraft can appear more than once (B787-048 appears twice).
 
 ### Aircraft drill-down
 
@@ -254,7 +256,7 @@ Note the difference from Tab 1: Tab 1 shows **one row per aircraft** (its curren
 
 ---
 
-## 9. Tab 6: Model
+## 9. Page 6: Model
 
 This tab answers: how good is the prediction, and can we trust it?
 
@@ -338,78 +340,83 @@ High Risk means the model predicts a defect. Medium means the risk is 20% or mor
 
 ---
 
-## 12. Tab 7: AI agents (the AI business team)
+## 12. The AI assistant panel (the multi-agent system)
 
 ### What it is, in one sentence
-**A team of AI engineers that turns the ML model's results into a business case.** Four specialists work at the same time on the problems, the fixes, the operations plan and the money; they check each other's numbers; and the Head of Reliability writes one **executive business plan** for management: problems, ranked decisions with dollar value and KPIs, financials, and a this-week / 30 / 60 / 90-day roadmap.
+**A team of AI agents that works like a small analysis department.** Four specialists each study one part of the fleet at the same time, check each other's work, and a lead agent turns everything into one prioritised action plan for a maintenance manager.
 
 ### Why we still need the ML model
 A common question: *"If we have AI agents, why build a machine-learning model?"*
 
 | Job | Best done by | Why |
 |---|---|---|
-| Predicting defects from 10,000 rows of numbers | **ML model** (F1 0.75) | Language AIs are poor at precise maths over large tables and give different answers each run |
-| Calculating money (value, cost, ROI, payback) | **Business calculators in code** | Money must be exact and repeatable, so the AI never does the arithmetic |
-| Finding the problems, weighing options, deciding, explaining, planning | **AI agents** | This is what language models are good at |
+| Predicting defects from 10,000 rows of numbers | **ML model** (F1 0.75) | Language AIs are poor at precise maths over large tables, give different answers each run, and would cost tokens for every row |
+| Deciding what to look at, explaining, checking, planning, answering questions | **AI agents** | This is what language models are good at |
 
-So **the model finds the risk, the calculators price it, and the agents reason, decide and communicate.**
+So the agents **use the model as a tool.** The Risk analyst doesn't guess risk; it calls our trained model and reads the scores. **Facts come from the validated model and real data; the AI does the reasoning and the communication.**
 
 ### How the team works
 
 ```
-ML model predictions + training data + YOUR business assumptions (fleet size, unit costs, policies)
-          │   (16 read-only tools: evidence + business calculators)
+Fleet data + trained ML model
+          │   (10 read-only tools: scores, statistics, histories)
           ▼
-┌────────────────────┬──────────────────────────┬─────────────────────┬──────────────────┐
-│ Reliability        │ Calibration & tooling    │ Maintenance planner │ Finance analyst  │  ← work in parallel
-│ engineer           │ engineer                 │ (risk-based         │ (value, cost,    │    (gpt-6-luna)
-│ (problems, root    │ (calibration trigger,    │  inspection,        │  ROI, payback,   │
-│  cause, supplier)  │  tools to pull, tension) │  seasons, spares)   │  system cost)    │
-└─────────┬──────────┴────────────┬─────────────┴──────────┬──────────┴────────┬─────────┘
-          └───────────────────────┴──── peer cross-checks ─┴───────────────────┘
+┌──────────────┬───────────────────┬──────────────────────────┬──────────────┐
+│ Risk analyst │ Measurement       │ Tool & calibration        │ Trend analyst│   ← work in parallel
+│ (model output│ analyst (tension, │ analyst (overdue tools,   │ (seasons,    │     (cheap model:
+│  & trust)    │  temp, vibration) │  drift)                   │  year on yr) │      gpt-6-luna)
+└──────┬───────┴─────────┬─────────┴────────────┬─────────────┴──────┬───────┘
+       └─────────────────┴──── peer cross-checks ┴────────────────────┘
+                                     │  e.g. "7 of 9 High Risk aircraft used Tool-03,
+                                     │   the only tool overdue in >25% of its jobs"
                                      ▼
-                     Head of Reliability (gpt-6.1-terra)
-          verifies with tools, re-prices the chosen policy, resolves disagreements
+                         Lead planner (stronger model: gpt-6.1-terra)
+                         reads all reports, verifies with tools, resolves disagreements
                                      ▼
-   Executive business plan: problems · ranked decisions ($ value, cost, owner, timing, KPI) ·
-   financials · this-week/30/60/90-day roadmap · risks · one-slide summary (downloadable)
+            Action plan: rank · action · target IDs · owner · urgency · evidence · who raised it
 ```
 
-| Agent | Business question it answers | Tools it may call |
+| Agent | Owns | Tools it may call |
 |---|---|---|
-| **Reliability engineer** | What are the problems, how much of the defects does each cause, and is the supplier or the tool to blame? | problem register, tension × calibration matrix, supplier × tool, monthly trend, model card |
-| **Calibration & tooling engineer** | Which calibration trigger gives the best value? Which tools do we pull this week? How big should the re-tension check be? | calibration policy options, tension check policy, tools at risk now, tool history |
-| **Maintenance planner** | How much risk-based inspection should we do? Which aircraft first? What staff and spares for the next season? | inspection capture curve, season plan, aircraft list, fleet overview, aircraft history |
-| **Finance analyst** | What is it worth, what does it cost, what is the return and payback, and what does the system cost to run? | business value (re-prices any policy), enterprise cost, calibration options, inspection curve |
-| **Head of Reliability** (lead) | What do we decide, who does it, when, and what is it worth? | all 16 tools (to verify and re-price) |
+| **Risk analyst** | Which aircraft are most at risk; how far to trust the model | fleet overview, aircraft list, aircraft history, model card |
+| **Measurement analyst** | Abnormal tension, temperature, vibration and slip; cases where readings look bad but the model says low risk | measurement signals, defect rate by factor, aircraft history |
+| **Tool & calibration analyst** | Overdue or drifting tools; which tool to pull first | tool status, tool history, defect rate by factor |
+| **Trend analyst** | Seasons, year-on-year change, what's coming next | monthly trend, seasonal comparison, defect rate by factor |
+| **Lead planner** | One plan; resolving disagreements | all 10 tools (to verify) |
 | **Router** (chat) | Sends each question to the right specialist | none |
 
-**How the agents check each other (computed in code, then judged by the lead):**
-- **Root cause vs finance:** 39% of defects involve overdue tools, which matches the calibration fix's defects avoided and its value.
-- **Supplier vs tool:** with a calibrated tool, Supplier A is at 1.7% and Supplier B at 1.8%, so don't switch suppliers.
-- **Planner vs tooling:** which High Risk aircraft used the tools that are above the calibration trigger right now (Tool-03).
-- **Finance sanity check:** AI tokens are only about 2% of the system's cost.
+**How the agents check each other:**
+- **Risk vs tools:** are the High Risk aircraft the ones that used the overdue tool? Yes: 7 of 9 used Tool-03.
+- **Measurements vs model:** the Measurement analyst finds screenings where readings were abnormal but the model scored low risk (about 50). The model might be missing something, so the lead schedules them for a check.
+- The lead **re-calls tools itself** to verify any claim before putting it in the plan.
 
-### The business assumptions panel
-Open **"Business assumptions"** to set your company's numbers: fleet size (default 1,000 aircraft), bases, users, AI model tier, cost per defect, inspection, calibration and re-tension costs, and the policy settings (calibration trigger, re-tension threshold, inspection share). **Rates come from the model and data; these assumptions drive the money.** Change them and run again; the whole plan is re-priced.
+### Where to find it: the ✨ AI panel
+Click the **✨ AI** button at the top right of any page. A chat panel slides open on the right side and stays in view while you scroll or switch pages (it keeps your conversation). Click **✕ Close AI** to hide it.
 
-### What you see on the tab
-1. **▶ Build business plan:** about 1–2 minutes, about $0.04–0.05.
-2. **Executive summary** and six **money cards**: annual value, annual cost, system cost, net benefit, return, payback.
-3. **Problems found**, each with its share of defects and evidence.
-4. **Decisions table:** ranked, with timing (This week / 30 / 60 / 90 days), target, owner, value and cost per year, KPI and target, and who raised it.
-5. **Roadmap**: four columns (this week, 30, 60, 90 days).
-6. **How the agents checked each other**, **risks and limits**, and a **one-slide summary**.
-7. **Download the business plan (Markdown)**, ready to paste into a report or slide.
-8. **Specialist reports**: findings and recommendations, each with a ✓ / ⚠ number check.
-9. **Cost meter** and **audit trail** (every tool call).
-10. **Ask the team:** one-click business questions ("Which calibration trigger gives the best value?", "How much inspection should we do?", "What does this system cost us per year?", "Is Supplier B the problem?"), a free chat box, and **🛡 Try a prompt injection**.
+**Inside the panel:**
+1. **▶ Run briefing:** the whole team runs (about a minute, about 3–5¢), and the briefing appears **as a chat message**:
+   - the lead planner's **summary** and **priority actions** (urgency, target, owner, evidence)
+   - **risks, caveats and cross-checks** (expandable)
+   - **specialist reports**, one expandable card per agent, with findings (severity badges), recommended actions, tool calls and the **✓ / ⚠ number check**
+   - tokens and cost for the run
+2. **Ask a question** in the chat box, e.g. "Why is B787-022 high risk?" or "Which tool should we calibrate first?". The router sends it to the right specialist, who answers with checked numbers.
+3. **🛡** sends a known prompt-injection attack, to demo the security controls live.
+4. **🗑** clears the chat.
 
-**Example result (a real run, 1,000 aircraft):** the team recommended a **calibration trigger of 45** (about 794 defects avoided a year, about $3.97M gross value, for 278 extra calibrations), a 6% re-tension safety check, and inspecting the model's top 5% of screenings. It re-priced the plan itself: **net benefit about $688k–$1.34M a year after all system and programme costs**, **2.9–5.7×** return on the system's cost, and **payback on integration in 0.7–2.3 months**. Every number passed the check.
+### Sharing a report: 📤 Share
+Every specialist report, and the full briefing, has a **📤 Share** button with three options:
 
-**Something to point out:** the agents didn't just pick the default. They found that 45 beats 60 by about $90k a year net, flagged that it needs about 6× more calibrations, and recommended piloting it with capacity checked first. That is engineering judgement on top of the model's numbers.
+| Option | What it does |
+|---|---|
+| **✉️ Email the report** | Type the recipient's email (the panel suggests who, e.g. Tool & calibration analyst goes to the tool crib / calibration team). It opens **your own email app** with the subject and the report text filled in. Nothing is sent by the server, and no email password or account is stored. |
+| **⬇ Download PDF** | A formatted PDF report: title, headline, findings with evidence, recommended actions, open questions, the data the agent used, and the "decision support only" note. Attach it to the email for the full report. |
+| **⬇ Download text** | The same report as plain text, for pasting into a ticket, Teams or a maintenance log. |
 
-**Demo tip:** press **Build business plan** at the start of your talk so it's ready when you reach this tab.
+**What to say:** "Each specialist's findings go straight to the people who act on them. The tool report goes to the tool crib, the inspection list to planning, as a PDF or an email, in one click."
+
+**Example result (a real run):** the plan ranked B787-022 "Today, line maintenance", the other High Risk aircraft "Today, planning", pull Tool-03 "Today, tool crib", Tool-05 next, the abnormal-but-low-risk aircraft "This week", and a reliability review "This month". Every number passed the check.
+
+**Demo tip:** open the AI panel and press **Run briefing** at the start of your talk. It keeps running while you present the other pages, and the panel keeps the result as you switch pages.
 
 ---
 
@@ -422,7 +429,7 @@ Open **"Business assumptions"** to set your company's numbers: fleet size (defau
 | **Made-up numbers (hallucination)** | An agent writes "risk 85%" when the model said 40% | **Number check:** every number an agent writes is compared with its tool results. A mismatch shows a ⚠ badge listing the number. |
 | **Too much power** | An agent runs code, deletes data, or browses the web | **Least privilege:** 10 read-only tools, an allowlist per agent; no code execution, file writes or web access. Tool IDs are checked by format (`B787-\d{3}`, `Tool-\d{2}`). |
 | **Malicious output** | An agent writes a phishing link or HTML into the page | All agent text is **HTML-escaped**; links and markup can't render. |
-| **Runaway cost / abuse** | A loop, or someone spamming the chat | At most 6 tool rounds per agent; capped output length; **5 business-plan runs and 20 questions per session**; **2 million tokens per day** for the whole app. |
+| **Runaway cost / abuse** | A loop, or someone spamming the chat | At most 6 tool rounds per agent; capped output length; **5 briefings and 20 questions per session**; **2 million tokens per day** for the whole app. |
 | **Key leak** | API key in code or GitHub | The key lives only in Streamlit Secrets or a local `.env` (git-ignored), never in code, prompts or logs. |
 | **Data leaving the company** | Fleet data sent to OpenAI | Agents see **summaries** (rates, counts, a few IDs), never the raw dataset in bulk. Technician IDs are never sent. |
 | **Over-trust** | Someone treats AI output as a maintenance order | Every prompt and the plan say it is **decision support**; a qualified engineer decides. The **audit log** records every question, guard flag, tool call, token count and cost. |
@@ -439,15 +446,15 @@ Open **"Business assumptions"** to set your company's numbers: fleet size (defau
 
 | Model | Used for | Price per 1M tokens (input / output) |
 |---|---|---|
-| gpt-6-luna | 4 specialist engineers, router | $0.10 / $0.50 |
-| gpt-6.1-terra | Head of Reliability (lead) | $1.00 / $5.00 |
+| gpt-6-luna | 4 specialists, router | $0.10 / $0.50 |
+| gpt-6.1-terra | Lead planner | $1.00 / $5.00 |
 
 | Action | Tokens | Cost | Time |
 |---|---|---|---|
-| **Full business plan** (5 agents, about 30–40 tool calls) | about 40,000–60,000 | **about $0.04–0.05** | about 1–2 minutes |
+| **Full team briefing** (5 agents, about 30 tool calls) | about 55,000–70,000 | **about $0.03–0.05** | about 1 minute |
 | **One chat question** (router + 1 specialist) | about 4,500 | **about $0.0007** | about 10 seconds |
 
-The Head of Reliability (lead) is most of the cost of a run, because it uses the stronger model and reads everyone's reports.
+The lead planner is most of the cost of a briefing, because it uses the stronger model and reads everyone's reports.
 
 **Why it's cheap:** the ML model and Python shrink 2,000 screenings into small summaries *before* any AI sees them. Expensive models are only used where judgement matters (the lead). Hard caps stop runaway spending.
 
@@ -481,13 +488,13 @@ Our per-run costs come from one 100-aircraft fleet. For a large aerospace busine
 No. ChatGPT alone would guess. Here, the agents can only see what our trained model and data tools return, every number is checked against those tools, and they work as a team with defined roles and cross-checks.
 
 **"What if the agents disagree?"**
-The Head of Reliability sees all reports and the peer cross-checks, re-checks the facts with its own tools, and records how it resolved the disagreement under "How the agents checked each other".
+The lead planner sees all reports and the peer cross-checks, re-checks the facts with its own tools, and records how it resolved the disagreement under "How the agents checked each other".
 
 **"What stops someone from hacking it through the chat?"**
 Injection screening, data wrapping, read-only tools, number checks and escaped output. Even if someone tricked the wording, the agent has no power to change data or reveal the key. The key isn't in its prompt at all.
 
 **"How much does it cost to run?"**
-About 4–5 cents per full business plan and about a tenth of a cent per question, measured on one 100-aircraft fleet. At enterprise scale (1,000 aircraft), AI tokens are about $17k–$175k a year, and the whole system costs about $0.7M–$1.5M a year, mostly people, integration and compliance. It pays back in year 1.
+About 3–5 cents per full team briefing and less than a tenth of a cent per question, measured on one 100-aircraft fleet. At enterprise scale (1,000 aircraft), AI tokens are about $17k–$175k a year, and the whole system costs about $0.7M–$1.5M a year, mostly people, integration and compliance. It pays back in year 1.
 
 **"Can it run without the internet or OpenAI?"**
 The dashboard and the ML model work offline. Only the AI agents tab needs the API. The design lets us switch providers or use a self-hosted model later.

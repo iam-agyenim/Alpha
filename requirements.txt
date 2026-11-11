@@ -8,4 +8,5 @@ openpyxl==3.1.5
 xgboost==3.4.1   # only for scripts/compare_model_families.py
 streamlit==1.67.0  # dashboard
 plotly==7.1.0      # dashboard charts
-openai==3.49.0       # AI agent team (dashboard/agents_tab.py)
+openai==3.49.0       # AI agent team (dashboard/ai_panel.py)
+fpdf2==2.8.7         # PDF export of agent reports (dashboard/report_share.py)

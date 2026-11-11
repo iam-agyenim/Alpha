@@ -16,7 +16,7 @@ import streamlit as st
 
 from belt_defect import config
 from belt_defect import fleet_analysis as fa
-import agents_tab  # noqa: E402  (dashboard/agents_tab.py)
+import ai_panel  # noqa: E402  (dashboard/ai_panel.py)
 
 st.set_page_config(page_title="B787 Belt Health", page_icon="✈️", layout="wide")
 
@@ -84,7 +84,7 @@ def kpi(col, label: str, value: str, note: str = ""):
 # ============================================================================ styles
 html(f"""<style>
 .stApp {{background:{PAGE_BG};}}
-.block-container {{padding-top:3.5rem; max-width:1400px;}}
+.block-container {{padding-top:2.2rem; max-width:1600px;}}
 [data-testid="stAppDeployButton"], footer {{display:none;}}
 .kicker {{display:flex; align-items:center; gap:14px; color:{BLUE}; letter-spacing:.22em; font-size:14px;
           font-weight:600; text-transform:uppercase;}}
@@ -114,6 +114,16 @@ table.fleet td.why {{font-size:13px; color:{INK_2}; min-width:260px; white-space
 .kpi-note {{font-size:12.5px; color:{INK_2};}}
 .section-title {{font-size:19px; font-weight:800; color:{NAVY}; margin-top:10px;}}
 .section-sub {{font-size:13.5px; color:{INK_2}; margin-bottom:6px;}}
+.table-wrap {{overflow-x:auto; max-width:100%;}}
+.st-key-page [role="radiogroup"] {{gap:2px;}}
+.st-key-page [role="radiogroup"] > div {{width:100%;}}
+.st-key-page [data-testid="stRadioOption"] {{padding:9px 12px; border-radius:8px; width:100%; cursor:pointer;}}
+.st-key-page [data-testid="stRadioOption"] > div > div:first-child:not([data-testid]) {{display:none;}}
+.st-key-page [data-testid="stRadioOption"] p {{font-size:15px;}}
+.st-key-page [data-testid="stRadioOption"]:hover {{background:#EEF2F9;}}
+.st-key-page [data-testid="stRadioOption"][data-selected="true"] {{background:#E3EAF7; box-shadow:inset 3px 0 0 {BLUE};}}
+.st-key-page [data-testid="stRadioOption"][data-selected="true"] p {{font-weight:700; color:{NAVY};}}
+[data-testid="stColumn"]:has(.ai-head) {{position:sticky; top:0.75rem; align-self:flex-start;}}
 .insight {{background:#fff; border-left:4px solid {GOLD}; border-radius:8px; padding:12px 16px; margin:6px 0 14px;
            color:{INK}; font-size:14.5px;}}
 </style>""")
@@ -133,7 +143,14 @@ except FileNotFoundError as err:
 
 last_date = data.test[config.DATE_COLUMN].max()
 
+PAGES = {"Fleet alert": "🚨", "Trends": "📈", "Factors": "🔍", "Tools & calibration": "🔧",
+         "Inspection list": "📋", "Model": "🧠"}
+
 with st.sidebar:
+    st.markdown("### Pages")
+    page = st.radio("Pages", list(PAGES), format_func=lambda p: f"{PAGES[p]}  {p}", label_visibility="collapsed",
+                    key="page")
+    st.divider()
     st.markdown("### Settings")
     basis = st.radio("Aircraft status based on",
                      ["Latest screening", "Riskiest screening, last 30 days"],
@@ -149,11 +166,9 @@ aircraft = fa.aircraft_status(data, window_days)
 tools = fa.tool_summary(data)
 alert = fa.fleet_alert(aircraft, tools)
 
-tab_alert, tab_trends, tab_factors, tab_tools, tab_inspect, tab_model, tab_agents = st.tabs(
-    ["Fleet alert", "Trends", "Factors", "Tools & calibration", "Inspection list", "Model", "AI agents"])
 
 # ============================================================================ 1. Fleet alert (main page)
-with tab_alert:
+def page_fleet_alert():
     html('<div class="kicker">Case 3 · Fleet belt health</div>'
          '<div class="page-title">B787 Fleet <b>Dashboard</b></div>')
 
@@ -174,9 +189,9 @@ with tab_alert:
         f'<td>{escape(r.Engine)}</td><td>{r["Screening date"]:%d %b %Y}</td><td>{pct(r["Defect risk"] * 100, 0)}</td>'
         f'<td class="why">{escape(r.Why)}</td></tr>'
         for _, r in rows.iterrows())
-    html('<table class="fleet"><thead><tr><th>Aircraft</th><th>Belt Status</th><th>Tension Difference</th>'
-         '<th>Tool</th><th>Engine</th><th>Screening</th><th>Defect risk</th><th>Why flagged</th></tr></thead>'
-         f'<tbody>{body}</tbody></table>')
+    html('<div class="table-wrap"><table class="fleet"><thead><tr><th>Aircraft</th><th>Belt Status</th>'
+         '<th>Tension Difference</th><th>Tool</th><th>Engine</th><th>Screening</th><th>Defect risk</th>'
+         f'<th>Why flagged</th></tr></thead><tbody>{body}</tbody></table></div>')
     st.caption("High Risk = model predicts a confirmed defect. Medium = defect risk ≥ 20% or a measurement outside "
                "the normal range (99% of defect-free screenings). Tension Difference = measured vs target tension.")
 
@@ -191,7 +206,7 @@ with tab_alert:
     kpi(c4, "Tools overdue for calibration", str(len(overdue_tools)), ", ".join(overdue_tools) or "none")
 
 # ============================================================================ 2. Trends
-with tab_trends:
+def page_trends():
     trend = fa.monthly_defect_trend(data)
     section("Monthly defect rate", "Training months show actual confirmed defects; test months show model predictions.")
     fig = go.Figure()
@@ -229,7 +244,7 @@ with tab_trends:
         st.plotly_chart(style_figure(fig, 260, "%", legend=False), width="stretch", config=PLOT_CONFIG)
 
 # ============================================================================ 3. Factors
-with tab_factors:
+def page_factors():
     section("What goes with a confirmed defect", "Training data (10,000 screenings, actual outcomes).")
     left, right = st.columns(2)
     with left:
@@ -273,7 +288,7 @@ with tab_factors:
          '(e.g. Tool-05 was the tool most often overdue), so they are associations, not separate proven causes.</div>')
 
 # ============================================================================ 4. Tools & calibration
-with tab_tools:
+def page_tools():
     section("Tool status", f"Latest month = {last_date:%B %Y}. Overdue = calibration load "
                            f"(days × uses since calibration ÷ 1000) above {fa.OVERDUE_CALIBRATION_LOAD}.")
     # Rates as percent numbers so the table can format them
@@ -325,7 +340,7 @@ with tab_tools:
          '(not calibrated since early 2025). Other tools stay near target.</div>')
 
 # ============================================================================ 5. Inspection list
-with tab_inspect:
+def page_inspection():
     flagged = fa.flagged_screenings(data)
     section("Screenings to inspect", f"{len(flagged)} test-period screenings are High Risk or Medium, "
                                      "highest defect risk first.")
@@ -369,7 +384,7 @@ with tab_inspect:
     st.caption("Each dot is one screening in the test period; height = predicted defect risk.")
 
 # ============================================================================ 6. Model
-with tab_model:
+def page_model():
     m = data.oof_metrics
     section("Prediction model", "Average of LightGBM, CatBoost and logistic regression probabilities.")
     c1, c2, c3, c4 = st.columns(4)
@@ -390,6 +405,24 @@ with tab_model:
         st.download_button("Download case_3_predictions.csv", submission.read_bytes(), "case_3_predictions.csv",
                            "text/csv")
 
-# ============================================================================ 7. AI agents
-with tab_agents:
-    agents_tab.render(data, section)
+# ============================================================================ layout: page + AI panel
+PAGE_FUNCTIONS = {"Fleet alert": page_fleet_alert, "Trends": page_trends, "Factors": page_factors,
+                  "Tools & calibration": page_tools, "Inspection list": page_inspection, "Model": page_model}
+
+st.session_state.setdefault("ai_open", False)
+_, ai_button_col = st.columns([6, 1])
+with ai_button_col:
+    if st.button("✕ Close AI" if st.session_state.ai_open else "✨ AI", key="ai_toggle", width="stretch",
+                 type="secondary" if st.session_state.ai_open else "primary",
+                 help="Open the AI assistant: run the agent team's briefing and ask questions."):
+        st.session_state.ai_open = not st.session_state.ai_open
+        st.rerun()
+
+if st.session_state.ai_open:
+    main_col, panel_col = st.columns([1.85, 1], gap="medium")
+    with main_col:
+        PAGE_FUNCTIONS[page]()
+    with panel_col:
+        ai_panel.render(data)
+else:
+    PAGE_FUNCTIONS[page]()

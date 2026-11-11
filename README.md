@@ -79,24 +79,26 @@ Test prediction: 106 of 2,000 rows flagged (5.3%, vs 2.7% in training). The test
 covers the hot-season peak and a build-up of overdue tool calibrations, both strong defect drivers;
 see `scripts/check_test_distribution_shift.py`.
 
-## AI business team (multi-agent layer)
+## AI assistant (multi-agent layer)
 
-`belt_defect/agents/` adds a team of OpenAI agents that turns the ML model's results into a business case
-(dashboard tab **AI agents**): a Reliability engineer, a Calibration & tooling engineer, a Maintenance planner and a
-Finance analyst work in parallel with read-only tools; peer cross-checks compare their numbers; the Head of
-Reliability writes one executive business plan (problems, ranked decisions with $ value/cost, owner, timing and
-KPI, financials, 30/60/90-day roadmap). A router answers business questions with the right specialist.
+`belt_defect/agents/` adds a team of OpenAI agents on top of the trained model. Click **✨ AI** (top right) to open the
+assistant panel: **▶ Run briefing** runs four specialists (risk, measurements, tools & calibration, trends) in
+parallel with read-only tools over the model's predictions; a lead planner merges their findings into one
+prioritised action plan, shown in the chat. Ask follow-up questions in the same chat; a router picks the specialist.
+Each report has a **📤 Share** menu: email (opens your mail app), PDF or text download.
 
 | File | Role |
 |---|---|
-| `agents/business.py` | Business calculators: problem register, calibration/tension/inspection policies, season plan, enterprise cost, value/ROI/payback (editable `Assumptions`) |
-| `agents/tools.py` | 16 read-only tools (model output, statistics, calculators), sanitised JSON |
+| `agents/tools.py` | 10 read-only tools (model output + statistics), sanitised JSON |
 | `agents/agent.py` | Capped tool-calling loop (OpenAI Responses API), number grounding check |
-| `agents/team.py` | Specialists, peer cross-checks, Head of Reliability, chat router, audit log |
+| `agents/team.py` | Specialists, peer cross-checks, lead planner, chat router, audit log |
 | `agents/guard.py` | Prompt-injection screening, output allowlist, grounding |
 | `agents/cost.py`, `agents/settings.py` | Token/cost meter, prices, models, spend limits |
-| `dashboard/agents_tab.py` | Streamlit UI (assumptions panel, plan, chat, downloads) |
+| `dashboard/ai_panel.py` | Slide-out AI chat panel (briefing, questions, Share menus) |
+| `dashboard/report_share.py` | PDF, text and email-link builders for the Share menu |
+
+The dashboard pages (Fleet alert, Trends, Factors, Tools & calibration, Inspection list, Model) are in the left sidebar.
 
 **API key:** put `OPENAI_API_KEY=...` in `.env` (git-ignored) locally, or in Streamlit Cloud **Settings → Secrets**.
-Measured cost: about $0.04–0.05 per business plan, about $0.001 per question. Tests: `.venv/bin/python -m pytest tests`.
-See `BUSINESS_CASE.md` and `PRESENTATION_GUIDE.md` sections 12–15.
+Measured cost: about $0.03–0.05 per briefing, about $0.001 per question. Tests: `.venv/bin/python -m pytest tests`.
+See `PRESENTATION_GUIDE.md` sections 12–15 and `BUSINESS_CASE.md`.
